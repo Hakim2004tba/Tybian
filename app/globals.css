@@ -1,0 +1,138 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   TIBYAN — Global base layer
+   Visual language is fixed by /docs/DESIGN_SYSTEM.md. This file wires that
+   system into Tailwind's base layer; it does not introduce new choices.
+   ========================================================================== */
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Safety net against horizontal overflow on mobile: if any single
+     element anywhere on any of this app's 40+ pages ever overflows the
+     viewport width by even a few pixels (a long untruncated string, a
+     flex row that doesn't wrap, a decorative element not fully
+     clipped), the WHOLE page becomes horizontally scrollable — which
+     is exactly what makes a page look "shifted/broken" on a phone even
+     though each individual component looks fine in isolation. This
+     clamps that class of bug at the root instead of chasing it file by
+     file across the entire app. */
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
+  body {
+    @apply bg-bg-light text-text-primary-light antialiased;
+    line-height: 1.7;
+  }
+
+  /* Direction is set dynamically per locale via the `dir` attribute on
+     <html> in app/layout.tsx (rtl for ar, ltr for en) — no longer
+     hardcoded here, since a CSS rule targeting `html` would otherwise
+     override that attribute regardless of locale. Components already
+     using RTL-aware logical properties (ms-/me-/ps-/border-s, etc.)
+     continue to flip correctly for either direction automatically. */
+
+  /* Site-wide micro-interaction baseline — every link, form control, and
+     icon-button gets a consistent, cheap color/border transition rather
+     than an abrupt state change, without needing to repeat
+     `transition-colors` in every single component. */
+  a,
+  button,
+  input,
+  select,
+  textarea {
+    transition-property: color, background-color, border-color, opacity, transform, box-shadow;
+    transition-duration: 180ms;
+    transition-timing-function: ease-out;
+  }
+
+  img {
+    transition: opacity 300ms ease-out;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-bold tracking-tight;
+  }
+  h1 {
+    font-size: 36px;
+    line-height: 1.3;
+  }
+  h2 {
+    font-size: 28px;
+    line-height: 1.35;
+    font-weight: 600;
+  }
+  h3 {
+    font-size: 20px;
+    line-height: 1.4;
+    font-weight: 600;
+  }
+
+  /* Numerals / tabular data stay LTR-isolated inside RTL flow so prices,
+     dates, and stats never reorder. Apply via the `.num` utility below. */
+  .num {
+    font-family: var(--font-inter), system-ui, sans-serif;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  ::selection {
+    background: rgba(108, 76, 241, 0.3);
+  }
+
+  /* Visible focus is non-negotiable — never suppressed without replacement */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 2px solid theme("colors.primary.DEFAULT");
+    outline-offset: 2px;
+    border-radius: theme("borderRadius.sm");
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Static, single-source glow. Never stack more than one per screen —
+     see DESIGN_SYSTEM.md §8. Implemented as a plain radial-gradient, no
+     canvas/filter cost. */
+  .glow-violet {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      circle at 60% 40%,
+      rgba(108, 76, 241, 0.35) 0%,
+      transparent 65%
+    );
+  }
+  .glow-gold {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      circle at 50% 30%,
+      rgba(232, 184, 75, 0.25) 0%,
+      transparent 65%
+    );
+  }
+}
