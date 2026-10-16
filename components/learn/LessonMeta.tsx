@@ -1,10 +1,6 @@
 import { Clock, BookOpen } from "lucide-react";
 import { MarkCompleteButton } from "@/components/learn/MarkCompleteButton";
-
-function formatMinutes(seconds: number) {
-  if (!seconds) return null;
-  return `${Math.round(seconds / 60)} دقيقة`;
-}
+import { formatLessonLength } from "@/lib/format/duration";
 
 export function LessonMeta({
   title,
@@ -23,7 +19,7 @@ export function LessonMeta({
   isCompleted: boolean;
   hasAccess: boolean;
 }) {
-  const duration = formatMinutes(durationSeconds);
+  const duration = formatLessonLength(durationSeconds) || null;
 
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">

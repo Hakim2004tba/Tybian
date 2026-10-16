@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { execute, newId, queryOne } from "@/lib/db";
 import { paymentProvider } from "@/lib/payment";
 import { completeOrderFromVerification } from "@/lib/actions/checkout";
 
@@ -31,32 +31,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_webhook" }, { status: 401 });
   }
 
-  const admin = createAdminClient();
+  /*
+    Recording the event IS the duplicate check.
 
-  const { error: eventInsertError } = await admin.from("payment_events").insert({
-    provider: parsed.eventType.split(".")[0] || "chargily",
-    event_type: parsed.eventType,
-    provider_event_id: parsed.eventId,
-    payload: parsed.raw,
-  });
-
-  if (eventInsertError) {
-    if ((eventInsertError as { code?: string }).code === "23505") {
-      // Duplicate delivery of an event we've already recorded — ack and
-      // stop. Do NOT reprocess; completeOrderFromVerification is also
-      // idempotent on its own, but there's no reason to call the
-      // provider's verify() endpoint again for a known-duplicate event.
+    uq_payment_events_provider_event survives the port as a plain unique
+    key — it was never partial — so a redelivered event still fails the
+    insert, and that failure is the signal to stop. MariaDB reports it as
+    ER_DUP_ENTRY where Postgres said 23505.
+  */
+  try {
+    await execute(
+      `INSERT INTO payment_events (id, provider, event_type, provider_event_id, payload)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        newId(),
+        parsed.eventType.split(".")[0] || "chargily",
+        parsed.eventType,
+        parsed.eventId,
+        JSON.stringify(parsed.raw),
+      ]
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "ER_DUP_ENTRY") {
+      // Already recorded. completeOrderFromVerification is idempotent
+      // too, but there is no reason to call verify() again for an event
+      // we know we have processed.
       return NextResponse.json({ ok: true, note: "duplicate event, already processed" });
     }
-    console.error("payment webhook: failed to record event", eventInsertError);
+    console.error("payment webhook: failed to record event", error);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 
-  const { data: payment } = await admin
-    .from("payments")
-    .select("id, order_id")
-    .eq("provider_checkout_id", parsed.providerReference)
-    .maybeSingle();
+  const payment = await queryOne<{ id: string; order_id: string | null }>(
+    `SELECT id, order_id FROM payments WHERE provider_checkout_id = ?`,
+    [parsed.providerReference]
+  );
 
   if (!payment?.order_id) {
     // No matching payment/order — acknowledge so the provider doesn't

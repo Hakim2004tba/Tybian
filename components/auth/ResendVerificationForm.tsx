@@ -4,8 +4,10 @@ import { useActionState } from "react";
 import { resendVerificationEmailAction } from "@/lib/auth/actions";
 import type { ActionState } from "@/lib/auth/actions";
 import { SubmitButton } from "@/components/auth/SubmitButton";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 export function ResendVerificationForm({ email }: { email: string }) {
+  const { t } = useI18n();
   const [state, formAction] = useActionState<ActionState, FormData>(resendVerificationEmailAction, {
     error: null,
   });
@@ -19,7 +21,7 @@ export function ResendVerificationForm({ email }: { email: string }) {
         </p>
       )}
       <SubmitButton variant="outline" size="sm">
-        إعادة إرسال رابط التحقق
+        {t.pages.resendVerification}
       </SubmitButton>
     </form>
   );

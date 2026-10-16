@@ -1,9 +1,0 @@
-{
-  "/admin/enrollments/page": "app/admin/enrollments/page.js",
-  "/admin/page": "app/admin/page.js",
-  "/admin/articles/page": "app/admin/articles/page.js",
-  "/admin/articles/new/page": "app/admin/articles/new/page.js",
-  "/admin/messages/page": "app/admin/messages/page.js",
-  "/admin/analytics/page": "app/admin/analytics/page.js",
-  "/admin/pricing/page": "app/admin/pricing/page.js"
-}

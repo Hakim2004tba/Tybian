@@ -5,10 +5,11 @@ import { REVIEW_REACTION_EMOJI } from "@/lib/review-reactions";
 import type { ReviewsSummary } from "@/lib/data/course-reviews";
 import type { MyReviewState } from "@/lib/data/course-reviews";
 import { ReviewForm } from "@/components/reviews/ReviewForm";
+import { getDictionary } from "@/lib/i18n/locale";
 
 const dateFormatter = new Intl.DateTimeFormat("ar-DZ", { day: "2-digit", month: "2-digit", year: "numeric" });
 
-export function ReviewsSection({
+export async function ReviewsSection({
   summary,
   courseId,
   courseSlug,
@@ -19,9 +20,11 @@ export function ReviewsSection({
   courseSlug: string;
   myReview: MyReviewState;
 }) {
+  const { dict } = await getDictionary();
+  const t = dict.courseDetails;
   return (
     <Card>
-      <h3 className="text-[17px]">التقييمات</h3>
+      <h3 className="text-[17px]">{t.reviews}</h3>
 
       <div className="mt-5 grid gap-8 sm:grid-cols-[auto_1fr]">
         <div className="text-center sm:min-w-[120px]">
@@ -30,7 +33,7 @@ export function ReviewsSection({
             {"★".repeat(Math.round(summary.averageRating))}
             {"☆".repeat(5 - Math.round(summary.averageRating))}
           </div>
-          <div className="num mt-1 text-[12.5px] text-text-muted-light">{summary.ratingCount} تقييم</div>
+          <div className="num mt-1 text-[12.5px] text-text-muted-light">{summary.ratingCount} {t.rating}</div>
         </div>
 
         {/* e.g. 5⭐ 82% — matches the requested distribution format exactly */}
@@ -56,13 +59,13 @@ export function ReviewsSection({
         {myReview.canReview ? (
           <>
             <h4 className="mb-3 text-[14px] font-semibold">
-              {myReview.existingReview ? "عدّل تقييمك" : "قيّم هذه الدورة"}
+              {myReview.existingReview ? t.editRating : t.rateCourse}
             </h4>
             <ReviewForm courseId={courseId} courseSlug={courseSlug} existingReview={myReview.existingReview} />
           </>
         ) : (
           <p className="text-[13px] text-text-muted-light">
-            يجب الاشتراك في هذه الدورة لتتمكن من تقييمها.
+            {t.mustEnrollToRate}
           </p>
         )}
       </div>
@@ -74,11 +77,11 @@ export function ReviewsSection({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#9c7cf5] text-[12px] font-semibold text-white">
-                    {(review.profiles?.full_name ?? "؟")[0]}
+                    {(review.profiles?.full_name ?? "?")[0]}
                   </div>
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[13.5px] font-semibold">{review.profiles?.full_name ?? "طالب"}</span>
+                      <span className="text-[13.5px] font-semibold">{review.profiles?.full_name ?? t.student}</span>
                       {review.reaction && <span className="text-[14px]">{REVIEW_REACTION_EMOJI[review.reaction]}</span>}
                     </div>
                     <div className="num text-[11px] text-gold">

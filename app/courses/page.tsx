@@ -1,3 +1,4 @@
+import { SignedInShell } from "@/components/dashboard/StudentShell";
 import { Suspense } from "react";
 import { Container } from "@/components/layout/Container";
 import { Reveal } from "@/components/ui/Reveal";
@@ -10,6 +11,10 @@ import { SortLinks } from "@/components/search/SortLinks";
 import { CourseSearchCard } from "@/components/search/CourseSearchCard";
 import { parseCourseSearchParams, PAGE_SIZE } from "@/lib/search/params";
 import { searchCourses, getSearchFacets } from "@/lib/data/course-search";
+import { getDictionary } from "@/lib/i18n/locale";
+import { listPacks } from "@/lib/data/packs";
+import { PackCard } from "@/components/packs/PackCard";
+import Link from "next/link";
 
 /**
  * /courses?year=1&rating=4&sort=popular — fully URL-based search per
@@ -24,11 +29,13 @@ import { searchCourses, getSearchFacets } from "@/lib/data/course-search";
  * never receives more than PAGE_SIZE course rows from the database,
  * let alone "all courses" filtered client-side.
  */
-export default async function CoursesSearchPage({
+async function CoursesSearchPageInner({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
+  const { dict } = await getDictionary();
+  const t = dict.learn;
   const raw = await searchParams;
   const params = parseCourseSearchParams(raw);
 
@@ -36,14 +43,15 @@ export default async function CoursesSearchPage({
     searchCourses(params),
     getSearchFacets(),
   ]);
+  const packs = await listPacks();
 
   return (
     <div className="bg-bg-light py-3xl">
       <Container>
-        <Badge variant="violet">الدورات</Badge>
-        <h1 className="mt-3">استكشف الدورات</h1>
+        <Badge variant="violet">{t.catalog.title}</Badge>
+        <h1 className="mt-3">{t.catalog.explore}</h1>
         <p className="mt-1 text-text-secondary-light">
-          <span className="num">{totalCount}</span> دورة متاحة
+          <span className="num">{totalCount}</span> {t.catalog.available}
         </p>
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[280px_1fr]">
@@ -52,6 +60,25 @@ export default async function CoursesSearchPage({
           </div>
 
           <div>
+            {/*
+              Packs sit ABOVE the results and outside the filters: they
+              are an offer on several courses at once, and folding them
+              into a filtered grid would make them look like one more
+              course while a subject filter quietly hid them.
+            */}
+            {packs.length > 0 && (
+              <div className="mb-6">
+                <h2 className="mb-3 text-[17px] font-semibold text-text-primary-light">
+                  {dict.packs.title}
+                </h2>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {packs.map((pack) => (
+                    <PackCard key={pack.id} pack={pack} />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <SortLinks params={params} />
             </div>
@@ -60,7 +87,7 @@ export default async function CoursesSearchPage({
               {items.length === 0 ? (
                 <Card className="text-center">
                   <p className="text-[14px] text-text-secondary-light">
-                    لا توجد دورات مطابقة لهذا البحث. جرّب تعديل الفلاتر.
+                    {t.catalog.noMatch}
                   </p>
                 </Card>
               ) : (
@@ -103,5 +130,20 @@ function ResultsSkeleton() {
         </Card>
       ))}
     </div>
+  );
+}
+
+/*
+  The student shell is applied HERE rather than in a shared
+  app/courses/layout.tsx, because the one page under /courses that must
+  NOT have it — the lesson player — is nested below that layout and a
+  child cannot opt out of an ancestor. Wrapping the two pages that want
+  the rail keeps the player full-width without moving its URL.
+*/
+export default async function CoursesSearchPage(props: { searchParams: Promise<Record<string, string | undefined>> }) {
+  return (
+    <SignedInShell>
+      <CoursesSearchPageInner {...props} />
+    </SignedInShell>
   );
 }

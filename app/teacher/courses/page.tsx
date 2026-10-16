@@ -1,66 +1,82 @@
-import { createClient } from "@/lib/supabase/server";
-import { getSessionUser } from "@/lib/auth/session";
-import { Container } from "@/components/layout/Container";
-import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
+import Link from "next/link";
+import { BookOpen, Star, Users, ArrowLeft } from "lucide-react";
+import { getTeacherScope, listCourses } from "@/lib/data/teacher";
+import { getDictionary } from "@/lib/i18n/locale";
+
+export const dynamic = "force-dynamic";
 
 /**
- * "Course management according to permissions" (per the request) means:
- * a teacher only ever sees/edits courses where courses.teacher_id maps
- * back to their own teachers row. That scoping is NOT implemented here
- * via a `.eq("teacher_id", ...)` filter we could forget to add — it's
- * enforced by the `courses_teacher_manage_own` RLS policy in
- * 0009_rls_policies.sql, so even a plain `select *` below can only ever
- * return this teacher's own rows (or, for an admin account, all rows).
+ * A teacher sees only the courses whose `courses.teacher_id` maps back
+ * to their own `teachers` row.
+ *
+ * That scoping used to be described as coming from an RLS policy. It
+ * does not any more — the policies went with Supabase — so it is done
+ * in one place, lib/data/teacher.ts, and every page in this space reads
+ * through it. An unfiltered SELECT here would show each teacher every
+ * other teacher's drafts.
  */
 export default async function TeacherCoursesPage() {
-  const user = await getSessionUser();
-  const supabase = await createClient();
+  const { dict } = await getDictionary();
+  const t = dict.teacher.courses;
 
-  const { data: courses, error } = await supabase
-    .from("courses")
-    .select("id, title, status, students_count, rating")
-    .order("created_at", { ascending: false });
+  const scope = await getTeacherScope();
+  if (!scope) return null;
+  const courses = await listCourses(scope);
+
+  const statusLabel: Record<string, string> = {
+    published: t.statusPublished,
+    draft: t.statusDraft,
+    archived: t.statusArchived,
+  };
 
   return (
-    <div className="bg-bg-light py-3xl">
-      <Container>
-        <Badge variant="violet">إدارة الدورات</Badge>
-        <h1 className="mt-3">دوراتي</h1>
-        <p className="mt-2 text-text-secondary-light">
-          الدور: <b>{user?.role}</b> — القائمة أدناه محدودة بدورات هذا
-          الحساب فقط عبر RLS، وليس عبر فلترة في الواجهة.
-        </p>
+    <div className="px-md py-lg md:px-xl md:py-xl">
+      <h1 className="text-[22px] font-bold text-text-primary-light">{t.title}</h1>
 
-        {error && (
-          <Card className="mt-6 border-error/30 bg-error/5">
-            <p className="text-sm text-error">تعذّر تحميل الدورات: {error.message}</p>
-          </Card>
-        )}
-
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
-          {courses?.length ? (
-            courses.map((c) => (
-              <Card key={c.id}>
-                <h3 className="text-[16px]">{c.title}</h3>
-                <div className="mt-2 flex items-center gap-3 text-[13px] text-text-muted-light">
-                  <span>{c.status}</span>
-                  <span>·</span>
-                  <span className="num">{c.students_count} طالب</span>
-                  <span>·</span>
-                  <span className="num">★ {c.rating}</span>
-                </div>
-              </Card>
-            ))
-          ) : (
-            <Card>
-              <p className="text-sm text-text-secondary-light">
-                لا توجد دورات مرتبطة بهذا الحساب بعد.
-              </p>
-            </Card>
-          )}
+      {courses.length === 0 ? (
+        <div className="mt-6 rounded-xl border border-border-light bg-white px-lg py-12 text-center">
+          <BookOpen size={26} className="mx-auto text-text-muted-light" strokeWidth={1.5} />
+          <p className="mt-3 text-[14px] text-text-secondary-light">{dict.teacher.noCourses}</p>
         </div>
-      </Container>
+      ) : (
+        <ul className="mt-6 grid gap-3 md:grid-cols-2">
+          {courses.map((c) => (
+            <li key={c.id} className="rounded-xl border border-border-light bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="min-w-0 text-[15px] font-semibold text-text-primary-light">{c.title}</h2>
+                <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold text-primary">
+                  {statusLabel[c.status] ?? c.status}
+                </span>
+              </div>
+
+              <p className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-text-muted-light">
+                <span className="flex items-center gap-1.5">
+                  <BookOpen size={13} />
+                  <span className="num">{c.lesson_count}</span> {t.lessons}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Users size={13} />
+                  <span className="num">{c.students_count}</span> {t.students}
+                </span>
+                {Number(c.rating) > 0 && (
+                  <span className="flex items-center gap-1.5">
+                    <Star size={13} className="text-gold" fill="currentColor" />
+                    <span className="num">{Number(c.rating).toFixed(1)}</span>
+                  </span>
+                )}
+              </p>
+
+              <Link
+                href={`/courses/${c.slug}`}
+                className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary"
+              >
+                {t.open}
+                <ArrowLeft size={14} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

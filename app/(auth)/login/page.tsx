@@ -6,13 +6,14 @@ import { Input } from "@/components/ui/Input";
 import { Logo } from "@/components/layout/Logo";
 import { getDictionary } from "@/lib/i18n/locale";
 import { Mail, Lock } from "lucide-react";
+import { GoogleButton } from "@/components/auth/GoogleButton";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ redirect?: string }>;
+  searchParams: Promise<{ redirect?: string; error?: string; detail?: string }>;
 }) {
-  const { redirect } = await searchParams;
+  const { redirect, error, detail } = await searchParams;
   const { locale, dict } = await getDictionary();
 
   return (
@@ -47,6 +48,28 @@ export default async function LoginPage({
           <h2>{dict.auth.loginTitle}</h2>
           <p className="mt-1.5 text-[14.5px] text-text-secondary-light">{dict.auth.loginSubtitle}</p>
 
+          {/* Google sends failures back here as ?error=<code>. Only
+              codes this dictionary knows are shown, so the query string
+              cannot be used to render arbitrary text on the page. */}
+          {error && error in dict.auth.googleErrors && (
+            <p className="mt-4 rounded-md border border-error/30 bg-error/10 px-3.5 py-2.5 text-[13.5px] text-error">
+              {dict.auth.googleErrors[error as keyof typeof dict.auth.googleErrors]}
+              {/*
+                Google's own short code, shown small underneath.
+
+                It is meaningless to a student and decisive for whoever
+                has to fix it: invalid_client means the secret here does
+                not match the console, redirect_uri_mismatch means the
+                URI is not registered. Without it both look identical.
+                Whitelisted to a short code-shaped string so nothing
+                from the query string can be painted into the page.
+              */}
+              {detail && /^[\w .:()\-]{1,120}$/.test(detail) && (
+                <span className="num mt-1 block text-[11.5px] text-text-muted-light">{detail}</span>
+              )}
+            </p>
+          )}
+
           <AuthForm action={signInAction} className="mt-7">
             <input type="hidden" name="redirectTo" value={redirect ?? ""} />
             <div className="flex flex-col gap-4">
@@ -76,6 +99,8 @@ export default async function LoginPage({
               <SubmitButton className="w-full justify-center">{dict.auth.loginButton}</SubmitButton>
             </div>
           </AuthForm>
+
+          <GoogleButton />
 
           <p className="mt-6 text-center text-[14px]">
             {dict.auth.noAccount}{" "}

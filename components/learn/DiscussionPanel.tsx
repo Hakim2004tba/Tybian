@@ -16,6 +16,7 @@ import {
   type DiscussionActionState,
 } from "@/lib/actions/discussion";
 import type { DiscussionComment } from "@/lib/data/learn";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 const dateFormatter = new Intl.DateTimeFormat("ar-DZ", { day: "2-digit", month: "2-digit" });
 
@@ -28,8 +29,10 @@ function AuthorBadge({
   role: string | undefined;
   teacherProfileId: string | null;
 }) {
-  if (role === "admin") return <Badge variant="gold">الإدارة</Badge>;
-  if (role === "teacher" && authorId === teacherProfileId) return <Badge variant="violet">الأستاذ</Badge>;
+  const { t: T } = useI18n();
+  const t = T.learn.discussion;
+  if (role === "admin") return <Badge variant="gold">{t.roleAdmin}</Badge>;
+  if (role === "teacher" && authorId === teacherProfileId) return <Badge variant="violet">{t.roleTeacher}</Badge>;
   return null;
 }
 
@@ -57,6 +60,8 @@ export function DiscussionPanel({
   /** admin, or the owning teacher — allowed to pin */
   canModerate: boolean;
 }) {
+  const { t: T } = useI18n();
+  const t = T.learn.discussion;
   const boundAction = addCommentAction.bind(null, lessonId, courseSlug);
   const [state, formAction, pending] = useActionState<DiscussionActionState, FormData>(boundAction, {
     error: null,
@@ -66,7 +71,7 @@ export function DiscussionPanel({
     <Card tone="dark">
       <h3 className="mb-4 flex items-center gap-2 text-[15px] text-text-primary-dark">
         <MessageSquare size={16} />
-        النقاش
+        {t.title}
       </h3>
 
       <form action={formAction} className="mb-5">
@@ -74,7 +79,7 @@ export function DiscussionPanel({
         <textarea
           name="body"
           rows={3}
-          placeholder="اطرح سؤالاً أو أضف تعليقاً حول هذا الدرس..."
+          placeholder={t.placeholder}
           className="w-full rounded-sm border border-border-dark bg-surface-dark px-3.5 py-2.5 text-[13.5px] outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(108,76,241,0.1)]"
         />
         <button
@@ -82,12 +87,12 @@ export function DiscussionPanel({
           disabled={pending}
           className="mt-2 rounded-md bg-primary px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-primary-hover disabled:opacity-60"
         >
-          {pending ? "جارٍ الإرسال..." : "إرسال"}
+          {pending ? t.sending : t.send}
         </button>
       </form>
 
       {comments.length === 0 ? (
-        <p className="text-[13.5px] text-text-muted-dark">لا توجد تعليقات بعد — كن أول من يبدأ النقاش.</p>
+        <p className="text-[13.5px] text-text-muted-dark">{t.empty}</p>
       ) : (
         <div className="flex flex-col gap-5">
           {comments.map((c) => (
@@ -122,6 +127,8 @@ function CommentThread({
   teacherProfileId: string | null;
   canModerate: boolean;
 }) {
+  const { t: T } = useI18n();
+  const t = T.learn.discussion;
   const [editing, setEditing] = useState(false);
   const [replying, setReplying] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -153,13 +160,13 @@ function CommentThread({
     <div>
       <div className="flex items-center gap-2">
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#9c7cf5] text-[11px] font-semibold text-white">
-          {(comment.profiles?.full_name ?? "؟")[0]}
+          {(comment.profiles?.full_name ?? "?")[0]}
         </div>
-        <span className="text-[13px] font-medium text-text-primary-dark">{comment.profiles?.full_name ?? "طالب"}</span>
+        <span className="text-[13px] font-medium text-text-primary-dark">{comment.profiles?.full_name ?? t.roleStudent}</span>
         <AuthorBadge authorId={comment.userId} role={comment.profiles?.role} teacherProfileId={teacherProfileId} />
         {comment.is_pinned && (
           <Badge variant="gold">
-            <Pin size={10} /> مثبّت
+            <Pin size={10} /> {t.pinned}
           </Badge>
         )}
         <span className="num text-[11px] text-text-muted-dark">{dateFormatter.format(new Date(comment.created_at))}</span>
@@ -169,27 +176,27 @@ function CommentThread({
 
       <div className="ms-9 mt-1.5 flex flex-wrap items-center gap-3 text-[12px] text-text-muted-dark">
         <button onClick={() => setReplying((v) => !v)} className="flex items-center gap-1 hover:text-primary">
-          <CornerDownLeft size={12} /> رد
+          <CornerDownLeft size={12} /> {t.reply}
         </button>
         {isOwn && (
           <>
             <button onClick={() => setEditing(true)} className="flex items-center gap-1 hover:text-primary">
-              <Pencil size={12} /> تعديل
+              <Pencil size={12} /> {t.edit}
             </button>
             <button
               onClick={() => {
-                if (window.confirm("حذف هذا التعليق؟")) runVoid(() => deleteCommentAction(comment.id, courseSlug));
+                if (window.confirm(t.confirmDeleteComment)) runVoid(() => deleteCommentAction(comment.id, courseSlug));
               }}
               disabled={pending}
               className="flex items-center gap-1 hover:text-error"
             >
-              <Trash2 size={12} /> حذف
+              <Trash2 size={12} /> {t.delete}
             </button>
           </>
         )}
         {!isOwn && !isAdmin && (
           <button onClick={() => setReporting((v) => !v)} className="flex items-center gap-1 hover:text-error">
-            <Flag size={12} /> إبلاغ
+            <Flag size={12} /> {t.report}
           </button>
         )}
         {canModerate && (
@@ -198,7 +205,7 @@ function CommentThread({
             disabled={pending}
             className="flex items-center gap-1 hover:text-gold"
           >
-            <Pin size={12} /> {comment.is_pinned ? "إلغاء التثبيت" : "تثبيت"}
+            <Pin size={12} /> {comment.is_pinned ? t.unpin : t.pin}
           </button>
         )}
       </div>
@@ -244,6 +251,8 @@ function ReplyItem({
   currentUserId: string | null;
   teacherProfileId: string | null;
 }) {
+  const { t: T } = useI18n();
+  const t = T.learn.discussion;
   const [editing, setEditing] = useState(false);
   const [pending, startTransition] = useTransition();
   const isOwn = currentUserId === reply.userId;
@@ -263,17 +272,17 @@ function ReplyItem({
   return (
     <div>
       <div className="flex items-center gap-2">
-        <span className="text-[12.5px] font-medium text-primary">{reply.profiles?.full_name ?? "مستخدم"}</span>
+        <span className="text-[12.5px] font-medium text-primary">{reply.profiles?.full_name ?? t.roleUser}</span>
         <AuthorBadge authorId={reply.userId} role={reply.profiles?.role} teacherProfileId={teacherProfileId} />
         <span className="num text-[10.5px] text-text-muted-dark">{dateFormatter.format(new Date(reply.created_at))}</span>
       </div>
       <p className="mt-1 text-[13px] text-text-secondary-dark">{reply.body}</p>
       {isOwn && (
         <div className="mt-1 flex gap-3 text-[11.5px] text-text-muted-dark">
-          <button onClick={() => setEditing(true)} className="hover:text-primary">تعديل</button>
+          <button onClick={() => setEditing(true)} className="hover:text-primary">{t.edit}</button>
           <button
             onClick={() => {
-              if (window.confirm("حذف هذا الرد؟")) {
+              if (window.confirm(t.confirmDeleteReply)) {
                 startTransition(() => {
                   deleteReplyAction(reply.id, courseSlug);
                 });
@@ -282,7 +291,7 @@ function ReplyItem({
             disabled={pending}
             className="hover:text-error"
           >
-            حذف
+            {t.delete}
           </button>
         </div>
       )}
@@ -303,6 +312,8 @@ function InlineEditForm({
   onSaved: () => void;
   small?: boolean;
 }) {
+  const { t: T } = useI18n();
+  const t = T.learn.discussion;
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -328,10 +339,10 @@ function InlineEditForm({
       />
       <div className="mt-1.5 flex gap-2">
         <button type="submit" disabled={pending} className="text-[12px] font-semibold text-primary">
-          حفظ
+          {t.save}
         </button>
         <button type="button" onClick={onCancel} className="text-[12px] text-text-muted-dark">
-          إلغاء
+          {t.cancel}
         </button>
       </div>
     </form>
@@ -345,6 +356,8 @@ function InlineReplyForm({
   action: (prev: DiscussionActionState, formData: FormData) => Promise<DiscussionActionState>;
   onDone: () => void;
 }) {
+  const { t: T } = useI18n();
+  const t = T.learn.discussion;
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -365,15 +378,15 @@ function InlineReplyForm({
       <textarea
         name="body"
         rows={2}
-        placeholder="اكتب رداً..."
+        placeholder={t.replyPlaceholder}
         className="w-full rounded-sm border border-border-dark bg-surface-dark px-3 py-2 text-[13px] outline-none focus:border-primary"
       />
       <div className="mt-1.5 flex gap-2">
         <button type="submit" disabled={pending} className="text-[12px] font-semibold text-primary">
-          إرسال
+          {t.send}
         </button>
         <button type="button" onClick={onDone} className="text-[12px] text-text-muted-dark">
-          إلغاء
+          {t.cancel}
         </button>
       </div>
     </form>
@@ -389,6 +402,8 @@ function ReportForm({
   courseSlug: string;
   onDone: () => void;
 }) {
+  const { t: T } = useI18n();
+  const t = T.learn.discussion;
   const boundAction = reportCommentAction.bind(null, commentId, courseSlug);
   const [state, formAction, pending] = useActionState<DiscussionActionState, FormData>(boundAction, {
     error: null,
@@ -406,18 +421,26 @@ function ReportForm({
         defaultValue=""
         className="w-full rounded-sm border border-border-dark bg-surface-dark px-2.5 py-1.5 text-[12.5px]"
       >
-        <option value="" disabled>سبب الإبلاغ</option>
-        <option value="محتوى غير لائق">محتوى غير لائق</option>
-        <option value="إزعاج أو ترويج">إزعاج أو ترويج</option>
-        <option value="معلومات مضللة">معلومات مضللة</option>
-        <option value="أخرى">أخرى</option>
+        {/*
+          The VALUE stays Arabic while only the label translates. It is
+          what gets written to content_reports.reason and read by the
+          moderation queue, so translating it would mean the same
+          complaint arrives under two different strings depending on the
+          reporter's language — and older reports would no longer match
+          newer ones. The stored vocabulary is deliberately one language.
+        */}
+        <option value="" disabled>{t.reportReason}</option>
+        <option value="محتوى غير لائق">{t.reasonInappropriate}</option>
+        <option value="إزعاج أو ترويج">{t.reasonSpam}</option>
+        <option value="معلومات مضللة">{t.reasonMisleading}</option>
+        <option value="أخرى">{t.reasonOther}</option>
       </select>
       <div className="mt-2 flex gap-2">
         <button type="submit" disabled={pending} className="text-[12px] font-semibold text-error">
-          إرسال البلاغ
+          {t.sendReport}
         </button>
         <button type="button" onClick={onDone} className="text-[12px] text-text-muted-dark">
-          إلغاء
+          {t.cancel}
         </button>
       </div>
     </form>

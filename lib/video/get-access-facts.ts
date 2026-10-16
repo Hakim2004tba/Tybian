@@ -1,5 +1,7 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { queryOne } from "@/lib/db";
+import { getSessionUser } from "@/lib/auth/session";
+import { hasActiveEnrollment } from "@/lib/db/guard";
 import type { VideoAccessFacts } from "@/lib/video/access";
 
 export type LessonForPlayback = {
@@ -10,55 +12,79 @@ export type LessonForPlayback = {
 };
 
 /**
- * Gathers every fact decideVideoAccess() needs, in one place, so the
- * Route Handler stays a thin "gather facts → decide → act" pipeline.
+ * Gathers every fact decideVideoAccess() needs, so the Route Handler
+ * stays a thin "gather facts → decide → act" pipeline.
  *
- * Deliberately uses the caller's own authenticated (RLS-scoped) session
- * for everything here — lessons/courses are readable under RLS once a
- * course is published (or the caller is the owning teacher/admin), so
- * this function alone is enough to know WHETHER access should be
- * granted. It reads `lessons.video_id` (just a UUID reference — not
- * Bunny-identifying) but never touches the `videos` table itself: that
- * table is admin-only under RLS, and the actual bunny_video_id is only
- * ever fetched afterward, server-side, via service_role, and only once
- * this function's decision is ALLOW. See the playback Route Handler.
+ * decideVideoAccess() itself is untouched by this port: it was already a
+ * pure function with its own unit tests, and it still holds the ordering
+ * of the checks. Only the fact-gathering moved, because that half was
+ * Supabase's job.
+ *
+ * This is the gate in front of paid video. Two things about it are worth
+ * saying plainly, because the safety net that used to sit behind them is
+ * gone:
+ *
+ *   1. Under RLS, a mistake here was usually contained — the caller's own
+ *      policies still applied to whatever this function read. There is no
+ *      second line now. Whatever this returns, decideVideoAccess()
+ *      believes.
+ *
+ *   2. `isActivelyEnrolled` used to come from the has_active_enrollment()
+ *      RPC, so "is this enrollment currently valid" lived in exactly one
+ *      place. It still does — hasActiveEnrollment() in lib/db/guard.ts —
+ *      and this file calls it rather than writing the three conditions
+ *      out again. Do not inline them here.
  */
 export async function getLessonAccessFacts(lessonId: string): Promise<{
   facts: VideoAccessFacts;
   lesson: LessonForPlayback | null;
 }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
+  const isAdmin = user?.role === "admin";
 
-  const role = (user?.app_metadata?.role as string | undefined) ?? null;
-  const isAdmin = role === "admin";
+  /*
+    One query up through the hierarchy: lesson → section → course →
+    teacher → the teacher's profile id.
 
-  const { data: lesson } = await supabase
-    .from("lessons")
-    .select(
-      `id, video_id, is_free_preview,
-       course_sections ( course_id,
-         courses ( id, status, teacher_id, teachers ( profile_id ) ) )`
-    )
-    .eq("id", lessonId)
-    .is("deleted_at", null)
-    .maybeSingle();
+    `t.profile_id` is what identifies the owning teacher, not
+    `c.teacher_id` — courses point at a teachers row, and teachers point
+    at a profile. Comparing the user id to c.teacher_id would never match
+    and would silently lock every teacher out of their own drafts.
 
-  const courseRow = (
-    lesson?.course_sections as unknown as {
-      course_id: string;
-      courses: { id: string; status: string; teacher_id: string; teachers: { profile_id: string } | null } | null;
-    } | null
-  )?.courses;
+    No `status` filter in the WHERE clause on purpose: whether a
+    non-published course is viewable is decideVideoAccess()'s call, and
+    it needs the status to make it. Filtering here would collapse
+    "course is a draft" into "lesson does not exist" and change the
+    message the owning teacher sees.
+  */
+  const row = await queryOne<{
+    lesson_id: string;
+    video_id: string | null;
+    is_free_preview: number;
+    course_id: string;
+    course_status: "draft" | "published" | "archived";
+    teacher_profile_id: string | null;
+  }>(
+    `SELECT l.id              AS lesson_id,
+            l.video_id,
+            l.is_free_preview,
+            c.id              AS course_id,
+            c.status          AS course_status,
+            t.profile_id      AS teacher_profile_id
+       FROM lessons l
+       JOIN course_sections s ON s.id = l.section_id
+       JOIN courses c         ON c.id = s.course_id
+       LEFT JOIN teachers t   ON t.id = c.teacher_id
+      WHERE l.id = ? AND l.deleted_at IS NULL AND c.deleted_at IS NULL`,
+    [lessonId]
+  );
 
   if (!user) {
     return {
       lesson: null,
       facts: {
         authenticated: false,
-        lessonExists: !!lesson,
+        lessonExists: !!row,
         courseStatus: null,
         isFreePreview: false,
         isActivelyEnrolled: false,
@@ -68,7 +94,7 @@ export async function getLessonAccessFacts(lessonId: string): Promise<{
     };
   }
 
-  if (!lesson || !courseRow) {
+  if (!row) {
     return {
       lesson: null,
       facts: {
@@ -83,33 +109,36 @@ export async function getLessonAccessFacts(lessonId: string): Promise<{
     };
   }
 
-  const isOwningTeacher = courseRow.teachers?.profile_id === user.id;
+  const isOwningTeacher = row.teacher_profile_id === user.id;
 
-  // has_active_enrollment() is STABLE, not SECURITY DEFINER, so this RPC
-  // runs under the caller's own RLS context — it can only ever see the
-  // caller's own enrollment row (enrollments_select_own_or_admin), which
-  // is exactly what we want here: we're asking "is *this* user enrolled",
-  // never anyone else's. Reused via RPC so "is this enrollment currently
-  // valid" logic lives in exactly one place (the DB), not duplicated in
-  // application code — see 0007_functions_and_triggers.sql.
-  const { data: isActivelyEnrolled } = await supabase.rpc("has_active_enrollment", {
-    p_user_id: user.id,
-    p_course_id: courseRow.id,
-  });
+  /*
+    Asked only when it can change the answer.
+
+    decideVideoAccess() returns early for an admin, for the owning
+    teacher, and for a free preview, so the enrollment lookup would be
+    ignored in those cases — and this is on the path of every video
+    request. Skipping it is not a shortcut around the check: the value
+    stays false, and any decision that actually depends on enrollment
+    still reaches the query below.
+  */
+  let isActivelyEnrolled = false;
+  if (!isAdmin && !isOwningTeacher && !row.is_free_preview) {
+    isActivelyEnrolled = await hasActiveEnrollment(user.id, row.course_id);
+  }
 
   return {
     lesson: {
-      id: lesson.id,
-      videoId: lesson.video_id,
-      isFreePreview: lesson.is_free_preview,
-      courseId: courseRow.id,
+      id: row.lesson_id,
+      videoId: row.video_id,
+      isFreePreview: row.is_free_preview === 1,
+      courseId: row.course_id,
     },
     facts: {
       authenticated: true,
       lessonExists: true,
-      courseStatus: courseRow.status as VideoAccessFacts["courseStatus"],
-      isFreePreview: lesson.is_free_preview,
-      isActivelyEnrolled: Boolean(isActivelyEnrolled),
+      courseStatus: row.course_status,
+      isFreePreview: row.is_free_preview === 1,
+      isActivelyEnrolled,
       isOwningTeacher,
       isAdmin,
     },

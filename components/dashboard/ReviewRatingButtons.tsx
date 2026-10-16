@@ -5,15 +5,19 @@ import { useRouter } from "next/navigation";
 import { recordReviewAction } from "@/lib/actions/study-tools";
 import type { ReviewRating } from "@/lib/study/spaced-repetition";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
-const ratings: { value: ReviewRating; label: string; className: string }[] = [
-  { value: "again", label: "نسيته", className: "border-error/30 text-error hover:bg-error/10" },
-  { value: "hard", label: "صعب", className: "border-gold/40 text-gold hover:bg-gold/10" },
-  { value: "good", label: "جيد", className: "border-primary/30 text-primary hover:bg-primary/10" },
-  { value: "easy", label: "سهل", className: "border-success/30 text-success hover:bg-success/10" },
+const ratings: { value: ReviewRating; key: "forgot" | "hard" | "good" | "easy"; className: string }[] = [
+  // The label is looked up per render so it follows the language; only
+  // the value and the colour belong to the button itself.
+  { value: "again", key: "forgot", className: "border-error/30 text-error hover:bg-error/10" },
+  { value: "hard", key: "hard", className: "border-gold/40 text-gold hover:bg-gold/10" },
+  { value: "good", key: "good", className: "border-primary/30 text-primary hover:bg-primary/10" },
+  { value: "easy", key: "easy", className: "border-success/30 text-success hover:bg-success/10" },
 ];
 
 export function ReviewRatingButtons({ reviewId }: { reviewId: string }) {
+  const { t } = useI18n();
   const [pending, startTransition] = useTransition();
   const [done, setDone] = useState<{ days: number } | null>(null);
   const router = useRouter();
@@ -33,7 +37,7 @@ export function ReviewRatingButtons({ reviewId }: { reviewId: string }) {
   if (done) {
     return (
       <span className="text-[12.5px] text-success">
-        ✓ ستُراجَع بعد {done.days} {done.days === 1 ? "يوم" : "أيام"}
+        {t.dash.review.scheduledIn} {done.days} {done.days === 1 ? t.dash.common.day : t.dash.common.days}
       </span>
     );
   }
@@ -50,7 +54,7 @@ export function ReviewRatingButtons({ reviewId }: { reviewId: string }) {
             r.className
           )}
         >
-          {r.label}
+          {t.dash.review[r.key]}
         </button>
       ))}
     </div>

@@ -1,0 +1,1 @@
+{"version":"0.0.1","configurations":[{"name":"tibyan-prod","runtimeExecutable":"node","runtimeArgs":[".next/standalone/server.js"],"port":3101}]}

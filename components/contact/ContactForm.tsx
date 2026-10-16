@@ -5,8 +5,11 @@ import { Send } from "lucide-react";
 import { submitContactMessageAction, type ContactActionState } from "@/lib/actions/contact";
 import { Input } from "@/components/ui/Input";
 import { SubmitButton } from "@/components/auth/SubmitButton";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 export function ContactForm() {
+  const { t: T } = useI18n();
+  const t = T.pages.contactForm;
   const [state, formAction] = useActionState<ContactActionState, FormData>(submitContactMessageAction, {
     error: null,
   });
@@ -24,14 +27,14 @@ export function ContactForm() {
       {state.error && <p className="text-[13.5px] text-error">{state.error}</p>}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Input id="name" name="name" label="الاسم الكامل" required />
-        <Input id="email" name="email" type="email" label="البريد الإلكتروني" required />
+        <Input id="name" name="name" label={t.name} required />
+        <Input id="email" name="email" type="email" label={t.email} required />
       </div>
-      <Input id="subject" name="subject" label="الموضوع (اختياري)" />
+      <Input id="subject" name="subject" label={t.subject} />
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="body" className="text-[13.5px] font-semibold">
-          الرسالة
+          {t.message}
         </label>
         <textarea
           id="body"
@@ -44,7 +47,7 @@ export function ContactForm() {
 
       <SubmitButton className="w-fit">
         <Send size={16} />
-        إرسال الرسالة
+        {t.send}
       </SubmitButton>
     </form>
   );

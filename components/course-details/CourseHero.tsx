@@ -3,12 +3,8 @@ import { Star, Users, PlayCircle, Clock, ListVideo, GraduationCap } from "lucide
 import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/ui/Reveal";
 import type { CourseDetails } from "@/lib/data/course-details";
-
-const levelLabel: Record<string, string> = {
-  beginner: "مبتدئ",
-  intermediate: "متوسط",
-  advanced: "متقدم",
-};
+import { formatCourseMinutes } from "@/lib/format/duration";
+import { getDictionary } from "@/lib/i18n/locale";
 
 /**
  * Stat "chips" — an icon in a small colored circle, matching the
@@ -25,7 +21,9 @@ function StatChip({ icon: Icon, children }: { icon: typeof Star; children: React
   );
 }
 
-export function CourseHero({ course }: { course: CourseDetails }) {
+export async function CourseHero({ course }: { course: CourseDetails }) {
+  const { dict } = await getDictionary();
+  const t = dict.courseDetails;
   const teacherName = course.teachers?.profiles?.full_name;
 
   return (
@@ -35,7 +33,6 @@ export function CourseHero({ course }: { course: CourseDetails }) {
         <Reveal>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="violet">{course.academic_years?.name_ar ?? "—"}</Badge>
-            <Badge variant="muted">{levelLabel[course.level] ?? course.level}</Badge>
             {course.tags.slice(0, 3).map((tag) => (
               <Badge key={tag} variant="teal">
                 {tag}
@@ -58,11 +55,11 @@ export function CourseHero({ course }: { course: CourseDetails }) {
             <StatChip icon={Star}>
               {course.rating.toFixed(1)} <span className="text-text-muted-dark">({course.rating_count})</span>
             </StatChip>
-            <StatChip icon={Users}>{course.students_count} طالب</StatChip>
-            <StatChip icon={ListVideo}>{course.lessons_count} درس</StatChip>
-            <StatChip icon={PlayCircle}>{course.videos_count} فيديو</StatChip>
+            <StatChip icon={Users}>{course.students_count} {t.student}</StatChip>
+            <StatChip icon={ListVideo}>{course.lessons_count} {t.lesson}</StatChip>
+            <StatChip icon={PlayCircle}>{course.videos_count} {t.video}</StatChip>
             <StatChip icon={Clock}>
-              {Math.floor(course.duration_minutes / 60)}س {course.duration_minutes % 60}د
+              {formatCourseMinutes(course.duration_minutes)}
             </StatChip>
           </div>
 
@@ -76,7 +73,7 @@ export function CourseHero({ course }: { course: CourseDetails }) {
             </div>
             <div>
               <div className="text-[14.5px] font-semibold text-text-primary-dark">
-                {teacherName ?? "أستاذ غير محدد"}
+                {teacherName ?? t.teacherUnset}
               </div>
               {course.teachers?.title && (
                 <div className="text-[12.5px] text-text-muted-dark">{course.teachers.title}</div>

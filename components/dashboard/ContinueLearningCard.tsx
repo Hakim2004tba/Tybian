@@ -5,8 +5,9 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { getSessionUser } from "@/lib/auth/session";
-import { createClient } from "@/lib/supabase/server";
+import { queryOne } from "@/lib/db";
 import { getAllProgress, pickContinueLearning } from "@/lib/data/student-dashboard";
+import { getDictionary } from "@/lib/i18n/locale";
 
 /**
  * Its own Suspense boundary. Reuses getAllProgress's request-level
@@ -14,26 +15,31 @@ import { getAllProgress, pickContinueLearning } from "@/lib/data/student-dashboa
  * StatsRow already made.
  */
 export async function ContinueLearningCard() {
+  const { dict } = await getDictionary();
+  const t = dict.dash;
   const user = await getSessionUser();
   const progress = await getAllProgress(user!.id);
   const target = pickContinueLearning(progress);
 
   if (!target) return null;
 
-  const supabase = await createClient();
-  const { data: course } = await supabase
-    .from("courses")
-    .select("slug, title, cover_url, teachers ( profiles ( full_name ) )")
-    .eq("id", target.course_id)
-    .maybeSingle();
+  const course = await queryOne<{
+    slug: string;
+    title: string;
+    cover_url: string | null;
+    teacher_name: string | null;
+  }>(
+    `SELECT c.slug, c.title, c.cover_url, p.full_name AS teacher_name
+       FROM courses c
+       LEFT JOIN teachers t ON t.id = c.teacher_id
+       LEFT JOIN profiles p ON p.id = t.profile_id
+      WHERE c.id = ?`,
+    [target.course_id]
+  );
 
   if (!course) return null;
 
-  const teacherRaw = Array.isArray(course.teachers) ? course.teachers[0] : course.teachers;
-  const profileRaw = teacherRaw
-    ? (Array.isArray(teacherRaw.profiles) ? teacherRaw.profiles[0] : teacherRaw.profiles)
-    : null;
-  const teacherName = profileRaw?.full_name ?? null;
+  const teacherName = course.teacher_name;
 
   const pct = target.total_lessons > 0 ? Math.round((target.completed_lessons / target.total_lessons) * 100) : 0;
   const lastLessonLabel =
@@ -51,7 +57,7 @@ export async function ContinueLearningCard() {
           )}
         </div>
         <div className="p-lg">
-          <Badge variant="teal">تابع من حيث توقفت</Badge>
+          <Badge variant="teal">{t.common.resumeWhereLeft}</Badge>
           <h3 className="mt-3 text-[18px] text-text-primary-dark">{course.title}</h3>
           {teacherName && <p className="mt-1 text-[13px] text-text-muted-dark">{teacherName}</p>}
 
@@ -72,7 +78,7 @@ export async function ContinueLearningCard() {
 
           {lastLessonLabel && (
             <p className="mt-3 text-[12.5px] text-text-muted-dark">
-              <span className="text-text-secondary-dark">متابعة:</span> {lastLessonLabel}
+              <span className="text-text-secondary-dark">{t.common.resuming}</span> {lastLessonLabel}
             </p>
           )}
 
@@ -86,7 +92,7 @@ export async function ContinueLearningCard() {
           >
             <Button>
               <PlayCircle size={16} />
-              متابعة التعلم
+              {t.common.continueLearning}
             </Button>
           </Link>
         </div>

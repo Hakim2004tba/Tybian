@@ -1,0 +1,93 @@
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  // Built for self-hosting on Octenium shared hosting (cPanel "Setup
+  // Node.js App"), not Vercel. "standalone" makes `next build` emit a
+  // self-contained .next/standalone/ tree with only the node_modules
+  // actually reachable at runtime — the difference between uploading
+  // ~40MB and uploading a full node_modules over FTP, and it lets the
+  // build run on a dev machine instead of inside the host's per-process
+  // memory limit (see DEPLOY_OCTENIUM.md).
+  output: "standalone",
+
+  // Without this, Next walks up looking for a workspace root, finds a
+  // stray ~/package-lock.json, and roots the standalone tree at the
+  // home directory — so server.js lands under
+  // .next/standalone/Downloads/<project>/tibyan-app/ instead of at
+  // .next/standalone/. Pinning the root to this app keeps the emitted
+  // tree flat, which is what the deploy script and Passenger expect.
+  outputFileTracingRoot: __dirname,
+
+  // Octenium fronts the app with an Nginx cache that stores HTML by URL
+  // and ignores the framework's own no-store defaults, so after every
+  // deploy visitors on a plain URL were served the PREVIOUS build's HTML,
+  // which references JS chunks that no longer exist — the "client-side
+  // exception" on /login. Query-stringed URLs bypassed that cache, which
+  // is why /login?probe=1 worked while /login did not.
+  //
+  // Sending explicit no-store on documents (and only on documents) keeps
+  // the hashed /_next/static assets immutably cacheable, so this costs
+  // nothing on asset delivery.
+  async headers() {
+    return [
+      {
+        source: "/:path((?!_next/static|_next/image).*)",
+        headers: [
+          // `no-transform` is the load-bearing part, not boilerplate:
+          // Octenium runs a layer that REWRITES asset URLs inside
+          // response bodies. It leaves GET responses alone but mangles
+          // the server-action POST response — chunk names in the RSC
+          // payload come back as e.g. "0b539k-di_26s.js", which exists
+          // in no build, double-prefixed to /_next//_next/... . The
+          // client then calls encodeURIPath(undefined) and the whole
+          // app dies with "a client-side exception has occurred".
+          // Verified by diffing the same build's POST response served
+          // locally (30115 bytes, correct names) against the same
+          // request on the host (31177 bytes, rewritten names).
+          //
+          // no-transform is the standard directive forbidding
+          // intermediaries from altering the body. If the host's layer
+          // ignores it, this must be disabled on their side — there is
+          // no application-level workaround for a proxy rewriting the
+          // bytes we emit.
+          { key: "Cache-Control", value: "no-store, no-transform, must-revalidate" },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
+      {
+        source: "/_next/static/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable, no-transform" }],
+      },
+    ];
+  },
+
+  images: {
+    // Runtime optimization is off because this deploys to shared
+    // hosting: `next/image`'s optimizer needs sharp, and the bundle is
+    // built on macOS, so it would ship a darwin-only sharp binary that
+    // cannot load on the Linux server (every image would 500). It is
+    // also the single most CPU/memory-hungry thing Next does per
+    // request, which is the wrong trade on a shared plan.
+    //
+    // The cost is that images are served at their source size, so
+    // source assets must be pre-sized — public/hero/anatomy.webp is
+    // 840px/240KB rather than the original 1024px/2MB PNG.
+    unoptimized: true,
+
+    // Local, hand-authored SVG illustrations only (course covers, hero
+    // art) — no remote/user-uploaded SVGs are served through next/image.
+    dangerouslyAllowSVG: true,
+    contentDispositionType: "attachment",
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
+
+    // Course covers and teacher avatars come from two places: Supabase
+    // Storage (the ImageUploadField component) and admin-pasted
+    // external URLs on older rows created before that upload widget
+    // existed (e.g. a Pinterest/CDN link). A single https wildcard
+    // covers both without needing to hardcode this project's specific
+    // Supabase ref or maintain an allowlist that breaks every time an
+    // admin pastes a link from a new source.
+    remotePatterns: [{ protocol: "https", hostname: "**" }],
+  },
+};
+
+module.exports = nextConfig;

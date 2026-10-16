@@ -14,15 +14,17 @@ import { AuthForm } from "@/components/auth/AuthForm";
 import { SubmitButton } from "@/components/auth/SubmitButton";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
-import { VideoUploadForm } from "@/components/admin/courses/VideoUploadForm";
-import { AttachBunnyVideoForm } from "@/components/admin/courses/AttachBunnyVideoForm";
+import { AttachVimeoVideoForm } from "@/components/admin/courses/AttachVimeoVideoForm";
 import { AttachYoutubeVideoForm } from "@/components/admin/courses/AttachYoutubeVideoForm";
 import { cn } from "@/lib/utils";
 
 export type VideoInfo = {
   id: string;
-  source: "bunny" | "youtube";
-  bunny_video_id: string | null;
+  source: "youtube" | "vimeo";
+  vimeo_video_id: string | null;
+  /** The unlisted-video hash; an unlisted Vimeo embed will not play
+   *  without it, so the editor carries it alongside the id. */
+  vimeo_hash: string | null;
   youtube_video_id: string | null;
   title: string;
   thumbnail_url: string | null;
@@ -65,7 +67,7 @@ export function LessonRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [videoPanelOpen, setVideoPanelOpen] = useState(false);
-  const [attachMode, setAttachMode] = useState<"link" | "youtube" | "upload">("link");
+  const [attachMode, setAttachMode] = useState<"vimeo" | "youtube">("vimeo");
   const [pending, startTransition] = useTransition();
 
   function runAction(fn: () => Promise<{ error: string | null }>) {
@@ -90,13 +92,13 @@ export function LessonRow({
   }
 
   function handleDetachVideo() {
-    if (!window.confirm("فصل الفيديو عن هذا الدرس؟ (الفيديو نفسه يبقى على Bunny)")) return;
+    if (!window.confirm("فصل الفيديو عن هذا الدرس؟ (الفيديو نفسه يبقى في حسابك على المنصة المستضيفة)")) return;
     runAction(() => detachVideoAction(lesson.id, courseId));
   }
 
   function handleDeleteVideo() {
     if (!lesson.video_id) return;
-    if (!window.confirm("حذف الفيديو نهائياً من Bunny Stream؟ لا يمكن التراجع.")) return;
+    if (!window.confirm("حذف سجل هذا الفيديو من المنصة؟ الفيديو نفسه يبقى في حسابك على Vimeo/YouTube.")) return;
     runAction(() => deleteVideoAction(lesson.video_id!, lesson.id, courseId));
   }
 
@@ -202,10 +204,10 @@ export function LessonRow({
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-3 text-[13px]">
                 <span className="text-text-muted-light">
-                  {video.source === "youtube" ? "معرّف YouTube:" : "معرّف Bunny:"}
+                  {video.source === "youtube" ? "معرّف YouTube:" : "معرّف Vimeo:"}
                 </span>
                 <span className="num rounded-sm bg-surface-light px-2 py-1 text-[12px]">
-                  {video.source === "youtube" ? video.youtube_video_id : video.bunny_video_id}
+                  {video.source === "youtube" ? video.youtube_video_id : video.vimeo_video_id}
                 </span>
                 {videoStatus && <Badge variant={videoStatus.variant}>{videoStatus.label}</Badge>}
                 {video.source === "youtube" && (
@@ -242,13 +244,13 @@ export function LessonRow({
               <div className="flex gap-1 rounded-md bg-surface-light p-1 text-[12.5px]">
                 <button
                   type="button"
-                  onClick={() => setAttachMode("link")}
+                  onClick={() => setAttachMode("vimeo")}
                   className={cn(
                     "flex-1 rounded-sm px-3 py-1.5 transition-colors",
-                    attachMode === "link" ? "bg-primary text-white" : "text-text-muted-light hover:text-primary"
+                    attachMode === "vimeo" ? "bg-primary text-white" : "text-text-muted-light hover:text-primary"
                   )}
                 >
-                  ربط من Bunny (موصى به)
+                  Vimeo (موصى به)
                 </button>
                 <button
                   type="button"
@@ -260,24 +262,12 @@ export function LessonRow({
                 >
                   يوتيوب
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setAttachMode("upload")}
-                  className={cn(
-                    "flex-1 rounded-sm px-3 py-1.5 transition-colors",
-                    attachMode === "upload" ? "bg-primary text-white" : "text-text-muted-light hover:text-primary"
-                  )}
-                >
-                  رفع مباشر من هنا
-                </button>
               </div>
 
-              {attachMode === "link" ? (
-                <AttachBunnyVideoForm lessonId={lesson.id} courseId={courseId} defaultTitle={lesson.title} />
-              ) : attachMode === "youtube" ? (
+              {attachMode === "youtube" ? (
                 <AttachYoutubeVideoForm lessonId={lesson.id} courseId={courseId} defaultTitle={lesson.title} />
               ) : (
-                <VideoUploadForm lessonId={lesson.id} courseId={courseId} defaultTitle={lesson.title} />
+                <AttachVimeoVideoForm lessonId={lesson.id} courseId={courseId} defaultTitle={lesson.title} />
               )}
             </div>
           )}

@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { queryOne } from "@/lib/db";
 
 /**
  * Every function here reads a pre-computed snapshot from
@@ -34,18 +34,32 @@ export type PopularCourse = {
 };
 
 async function getSnapshot<T>(scopeType: "platform" | "course", scopeId: string | null, metricKey: string) {
-  const supabase = await createClient();
-  let query = supabase
-    .from("analytics_snapshots")
-    .select("value, computed_at")
-    .eq("scope_type", scopeType)
-    .eq("metric_key", metricKey);
+  // Platform rows store the literal '-' rather than NULL — MariaDB
+  // treats NULLs in a unique key as distinct, so the sentinel is what
+  // keeps one row per (scope, metric). See lib/analytics/refresh.ts.
+  const row = await queryOne<{ value: unknown; computed_at: string }>(
+    `SELECT value, computed_at
+       FROM analytics_snapshots
+      WHERE scope_type = ? AND scope_id = ? AND metric_key = ?`,
+    [scopeType, scopeId ?? "-", metricKey]
+  );
 
-  query = scopeId ? query.eq("scope_id", scopeId) : query.is("scope_id", null);
+  if (!row) return null;
 
-  const { data } = await query.maybeSingle();
-  if (!data) return null;
-  return { value: data.value as T, computedAt: data.computed_at as string };
+  // MariaDB stores JSON as LONGTEXT, so the driver may hand back the raw
+  // string rather than a parsed value depending on version.
+  const value = typeof row.value === "string" ? safeParse(row.value) : row.value;
+  if (value === null) return null;
+
+  return { value: value as T, computedAt: row.computed_at };
+}
+
+function safeParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 export async function getPlatformOverview() {

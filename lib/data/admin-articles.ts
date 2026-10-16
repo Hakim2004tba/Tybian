@@ -1,5 +1,6 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { query, queryOne } from "@/lib/db";
+import { requireAdmin } from "@/lib/db/guard";
 
 const PAGE_SIZE = 15;
 
@@ -12,26 +13,51 @@ export type AdminArticleRow = {
 };
 
 export async function listArticlesAdmin(page: number) {
-  const supabase = await createClient();
-  const from = (page - 1) * PAGE_SIZE;
-  const to = from + PAGE_SIZE - 1;
+  await requireAdmin();
 
-  const { data, count } = await supabase
-    .from("articles")
-    .select("id, slug, title, is_published, created_at", { count: "exact" })
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .range(from, to);
+  const offset = (page - 1) * PAGE_SIZE;
 
-  return { items: (data ?? []) as AdminArticleRow[], totalCount: count ?? 0, page, pageSize: PAGE_SIZE };
+  const [rows, total] = await Promise.all([
+    query<Omit<AdminArticleRow, "is_published"> & { is_published: number }>(
+      `SELECT id, slug, title, is_published, created_at
+         FROM articles
+        WHERE deleted_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?`,
+      [PAGE_SIZE, offset]
+    ),
+    queryOne<{ n: number }>(`SELECT COUNT(*) AS n FROM articles WHERE deleted_at IS NULL`),
+  ]);
+
+  return {
+    items: rows.map((r) => ({ ...r, is_published: r.is_published === 1 })),
+    totalCount: Number(total?.n ?? 0),
+    page,
+    pageSize: PAGE_SIZE,
+  };
 }
 
+/**
+ * Admin only, and unlike the public getArticleBySlug this deliberately
+ * returns unpublished drafts — that is the point of the editor. The
+ * requireAdmin() above is what keeps the two apart.
+ */
 export async function getArticleForEdit(id: string) {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("articles")
-    .select("id, slug, title, excerpt, body, cover_url, is_published")
-    .eq("id", id)
-    .maybeSingle();
-  return data;
+  await requireAdmin();
+
+  const row = await queryOne<{
+    id: string;
+    slug: string;
+    title: string;
+    excerpt: string | null;
+    body: string;
+    cover_url: string | null;
+    is_published: number;
+  }>(
+    `SELECT id, slug, title, excerpt, body, cover_url, is_published
+       FROM articles WHERE id = ? AND deleted_at IS NULL`,
+    [id]
+  );
+
+  return row ? { ...row, is_published: row.is_published === 1 } : null;
 }

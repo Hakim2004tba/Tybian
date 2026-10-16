@@ -1,5 +1,6 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { query, queryOne } from "@/lib/db";
+import { requireAdmin } from "@/lib/db/guard";
 
 const PAGE_SIZE = 15;
 
@@ -13,16 +14,31 @@ export type ContactMessageRow = {
   created_at: string;
 };
 
+/**
+ * Contact messages, admin only.
+ *
+ * contact_messages had an insert-for-anyone policy and NO select policy
+ * for non-admins at all, so this read was impossible for a normal user
+ * however it was called. requireAdmin() is what carries that guarantee
+ * now — the page's layout guard is a second line, not the only one,
+ * because a data function that leaks when called from the wrong place is
+ * a function waiting to be called from the wrong place.
+ */
 export async function listContactMessages(page: number) {
-  const supabase = await createClient();
-  const from = (page - 1) * PAGE_SIZE;
-  const to = from + PAGE_SIZE - 1;
+  await requireAdmin();
 
-  const { data, count } = await supabase
-    .from("contact_messages")
-    .select("id, name, email, subject, body, status, created_at", { count: "exact" })
-    .order("created_at", { ascending: false })
-    .range(from, to);
+  const offset = (page - 1) * PAGE_SIZE;
 
-  return { items: (data ?? []) as ContactMessageRow[], totalCount: count ?? 0, page, pageSize: PAGE_SIZE };
+  const [items, total] = await Promise.all([
+    query<ContactMessageRow>(
+      `SELECT id, name, email, subject, body, status, created_at
+         FROM contact_messages
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?`,
+      [PAGE_SIZE, offset]
+    ),
+    queryOne<{ n: number }>(`SELECT COUNT(*) AS n FROM contact_messages`),
+  ]);
+
+  return { items, totalCount: Number(total?.n ?? 0), page, pageSize: PAGE_SIZE };
 }

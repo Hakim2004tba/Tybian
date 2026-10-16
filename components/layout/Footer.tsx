@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/layout/Logo";
 import type { Dictionary, Locale } from "@/lib/i18n/dictionaries";
+import { SocialLinks } from "@/components/layout/SocialLinks";
 
 /**
  * Compact on the lesson-watching route specifically: a student inside
@@ -48,6 +49,11 @@ export function Footer({ locale, dict }: { locale: Locale; dict: Dictionary }) {
           <div className="max-w-xs">
             <Logo tone="dark" />
             <p className="mt-4 text-sm leading-relaxed">{dict.footer.tagline}</p>
+
+            <h3 className="mb-3 mt-6 text-sm font-semibold text-text-secondary-dark">
+              {dict.footer.followUs}
+            </h3>
+            <SocialLinks tone="dark" />
           </div>
 
           <div className="flex flex-wrap gap-12">

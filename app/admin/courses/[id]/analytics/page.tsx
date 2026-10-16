@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowRight, Users, Wallet, TrendingUp, Star, Clock, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { createClient } from "@/lib/supabase/server";
+import { queryOne } from "@/lib/db";
 import { getCourseOverview, getCourseLessonEngagement } from "@/lib/analytics/queries";
 import { refreshCourseAnalyticsAction } from "@/lib/admin/actions/analytics";
 import { RefreshAnalyticsButton } from "@/components/admin/analytics/RefreshAnalyticsButton";
@@ -22,8 +22,10 @@ export default async function CourseAnalyticsPage({
 }) {
   const { id } = await params;
 
-  const supabase = await createClient();
-  const { data: course } = await supabase.from("courses").select("id, title").eq("id", id).maybeSingle();
+  const course = await queryOne<{ id: string; title: string }>(
+    `SELECT id, title FROM courses WHERE id = ?`,
+    [id]
+  );
   if (!course) notFound();
 
   const [overview, engagement] = await Promise.all([getCourseOverview(id), getCourseLessonEngagement(id)]);

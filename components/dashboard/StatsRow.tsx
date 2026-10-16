@@ -2,12 +2,8 @@ import { BookOpen, CheckCircle2, Clock, TrendingUp } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { getAllProgress, computeStats } from "@/lib/data/student-dashboard";
 import { getSessionUser } from "@/lib/auth/session";
-
-function formatHours(seconds: number) {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return hours > 0 ? `${hours}س ${minutes}د` : `${minutes}د`;
-}
+import { formatHoursMinutes } from "@/lib/format/duration";
+import { getDictionary } from "@/lib/i18n/locale";
 
 /**
  * Its own Suspense boundary (see app/dashboard/page.tsx) — computed from
@@ -16,16 +12,18 @@ function formatHours(seconds: number) {
  * course grid rather than blocking it.
  */
 export async function StatsRow() {
+  const { dict } = await getDictionary();
+  const t = dict.dash;
   const user = await getSessionUser();
   const progress = await getAllProgress(user!.id);
   const stats = computeStats(progress);
 
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      <StatCard icon={BookOpen} value={String(stats.coursesEnrolled)} label="دورات مسجَّل بها" />
-      <StatCard icon={CheckCircle2} value={String(stats.coursesCompleted)} label="دورات مكتملة" tone="success" />
-      <StatCard icon={Clock} value={formatHours(stats.totalWatchSeconds)} label="وقت المشاهدة" tone="gold" />
-      <StatCard icon={TrendingUp} value={`${stats.averageProgressPct}%`} label="متوسط التقدم" tone="teal" />
+      <StatCard icon={BookOpen} value={String(stats.coursesEnrolled)} label={t.stats.enrolled} />
+      <StatCard icon={CheckCircle2} value={String(stats.coursesCompleted)} label={t.stats.completed} tone="success" />
+      <StatCard icon={Clock} value={formatHoursMinutes(stats.totalWatchSeconds)} label={t.stats.watchTime} tone="gold" />
+      <StatCard icon={TrendingUp} value={`${stats.averageProgressPct}%`} label={t.stats.avgProgress} tone="teal" />
     </div>
   );
 }

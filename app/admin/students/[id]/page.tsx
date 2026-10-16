@@ -1,18 +1,39 @@
 import { notFound } from "next/navigation";
+import { query } from "@/lib/db";
+import { describeDuration } from "@/lib/plans/duration";
 import { Calendar, Phone, Activity, PlayCircle, Clock } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { PromoteToAdminButton } from "@/components/admin/PromoteToAdminButton";
 import { GrantEnrollmentForm } from "@/components/admin/GrantEnrollmentForm";
+import { DeleteAccountButton } from "@/components/admin/DeleteAccountButton";
 import {
   getStudentDetail,
   getStudentEnrollments,
   getStudentRecentActivity,
 } from "@/lib/data/admin-student-detail";
 import { listCourses } from "@/lib/data/admin-courses";
+import { MessageStudentForm } from "@/components/admin/students/MessageStudentForm";
+import Link from "next/link";
+import { adminThreadsWith } from "@/lib/data/teacher-inbox";
 
 const dateFormatter = new Intl.DateTimeFormat("ar-DZ", { day: "2-digit", month: "2-digit", year: "numeric" });
-const planLabel: Record<string, string> = { three_months: "3 أشهر", lifetime: "مدى الحياة" };
+/**
+ * What an EXISTING enrolment actually granted.
+ *
+ * Derived from its own dates, not from a lookup on the slot name. The
+ * table said "3 أشهر" for every `three_months` row — so after an admin
+ * changed a course to six months, an old three-month enrolment and a
+ * new six-month one both read "3 أشهر", and a new one bought after the
+ * change read wrong. An enrolment's length is a fact about that row.
+ */
+function grantedDuration(startsAt: string | null, expiresAt: string | null): string {
+  if (!expiresAt) return "مدى الحياة";
+  const start = startsAt ? new Date(startsAt).getTime() : NaN;
+  const end = new Date(expiresAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return "—";
+  return describeDuration(Math.round((end - start) / 86_400_000), "ar");
+}
 
 const activityLabel: Record<string, string> = {
   login: "تسجيل دخول",
@@ -31,6 +52,17 @@ export default async function AdminStudentDetailPage({
 }) {
   const { id } = await params;
 
+  /* Plan lengths per course, so the grant form can name what it will
+     actually do — see GrantEnrollmentForm. */
+  const planRows = await query<{
+    course_id: string;
+    plan_type: "three_months" | "lifetime";
+    duration_days: number | null;
+  }>(
+    `SELECT course_id, plan_type, duration_days
+       FROM course_prices WHERE is_active = 1`
+  );
+
   const [student, enrollments, activity, courses] = await Promise.all([
     getStudentDetail(id),
     getStudentEnrollments(id),
@@ -39,6 +71,9 @@ export default async function AdminStudentDetailPage({
   ]);
 
   if (!student) notFound();
+
+  const adminThreads = await adminThreadsWith(student.id);
+
 
   return (
     <div className="flex flex-col gap-6">
@@ -60,10 +95,58 @@ export default async function AdminStudentDetailPage({
             <span className="num text-text-muted-light">عضو منذ {dateFormatter.format(new Date(student.createdAt))}</span>
           </div>
         </div>
-        <PromoteToAdminButton userId={student.id} userName={student.fullName} redirectOnSuccessTo="/admin/students" />
+        <div className="flex flex-wrap items-center gap-2">
+          <PromoteToAdminButton userId={student.id} userName={student.fullName} redirectOnSuccessTo="/admin/students" />
+          <DeleteAccountButton userId={student.id} userName={student.fullName} />
+        </div>
       </div>
 
-      <GrantEnrollmentForm studentId={student.id} courses={courses.map((c) => ({ id: c.id, title: c.title }))} />
+      <MessageStudentForm studentId={student.id} studentName={student.fullName} />
+
+      {/* The conversations already open with this student — the replies
+          land here, not in a mailbox nobody checks. */}
+      {adminThreads.length > 0 && (
+        <section>
+          <h2 className="mb-2.5 text-[17px]">المحادثات</h2>
+          <ul className="flex flex-col gap-2">
+            {adminThreads.map((th) => (
+              <li key={th.id}>
+                <Link
+                  href="/admin/chats"
+                  className={
+                    "flex items-center justify-between gap-3 rounded-xl border p-3.5 transition hover:border-primary/40 " +
+                    (th.unread ? "border-primary/40 bg-primary/[0.05]" : "border-border-light bg-white")
+                  }
+                >
+                  <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-text-primary-light">
+                    {th.subject}
+                  </span>
+                  {th.unread && (
+                    <span className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
+                      ردّ جديد
+                    </span>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <GrantEnrollmentForm
+        studentId={student.id}
+        courses={courses.map((c) => {
+          const a = planRows.find((p) => p.course_id === c.id && p.plan_type === "three_months");
+          const b = planRows.find((p) => p.course_id === c.id && p.plan_type === "lifetime");
+          return {
+            id: c.id,
+            title: c.title,
+            /* An unpriced course keeps what the slots used to mean. */
+            planADays: a ? (a.duration_days === null ? null : Number(a.duration_days)) : 90,
+            planBDays: b ? (b.duration_days === null ? null : Number(b.duration_days)) : null,
+          };
+        })}
+      />
 
       <div>
         <h2 className="mb-4 text-[17px]">الدورات المشترى بها</h2>
@@ -82,7 +165,7 @@ export default async function AdminStudentDetailPage({
                     <div>
                       <h3 className="text-[15px]">{e.courseTitle}</h3>
                       <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[12.5px] text-text-muted-light">
-                        <Badge variant={e.planType === "lifetime" ? "gold" : "violet"}>{planLabel[e.planType] ?? e.planType}</Badge>
+                        <Badge variant={e.planType === "lifetime" ? "gold" : "violet"}>{grantedDuration(e.startsAt, e.expiresAt)}</Badge>
                         <span className="num flex items-center gap-1">
                           <Clock size={12} />
                           {e.expiresAt

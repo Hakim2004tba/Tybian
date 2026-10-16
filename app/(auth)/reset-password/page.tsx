@@ -5,13 +5,20 @@ import { Input } from "@/components/ui/Input";
 import { Lock } from "lucide-react";
 
 /**
- * Reached via the link in the password-reset email. Supabase's
- * @supabase/ssr cookie handler exchanges the recovery token for a
- * temporary session automatically when this page loads (through
- * middleware.ts calling `getUser()`), so `resetPasswordAction` can call
- * `auth.updateUser()` directly without re-collecting the old password.
+ * Reached via the link in the password-reset email.
+ *
+ * The token arrives as a query parameter and is passed straight through
+ * to the action in a hidden field. There is no session here and no
+ * signing in: `resetPasswordAction` validates the token itself, against
+ * its stored hash, and that token alone is the authority to set a new
+ * password. Which is why it is single-use and expires in an hour.
  */
-export default function ResetPasswordPage() {
+export default async function ResetPasswordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ token?: string }>;
+}) {
+  const { token } = await searchParams;
   return (
     <div className="flex min-h-[calc(100vh-73px)] items-center justify-center bg-bg-light p-8">
       <div className="w-full max-w-[400px]">
@@ -21,6 +28,7 @@ export default function ResetPasswordPage() {
         </p>
 
         <AuthForm action={resetPasswordAction} className="mt-6">
+          <input type="hidden" name="token" value={token ?? ""} />
           <div className="flex flex-col gap-4">
             <Input
               id="password"

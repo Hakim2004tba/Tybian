@@ -5,14 +5,9 @@ import { Badge } from "@/components/ui/Badge";
 import { getPlatformOverview, getPopularCourses } from "@/lib/analytics/queries";
 import { refreshPlatformAnalyticsAction } from "@/lib/admin/actions/analytics";
 import { RefreshAnalyticsButton } from "@/components/admin/analytics/RefreshAnalyticsButton";
+import { formatHoursMinutes } from "@/lib/format/duration";
 
 const currency = new Intl.NumberFormat("en-US");
-
-function formatHours(seconds: number) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return h > 0 ? `${h}س ${m}د` : `${m}د`;
-}
 
 /**
  * Every number on this page comes from analytics_snapshots — nothing
@@ -49,7 +44,7 @@ export default async function AdminAnalyticsPage() {
             <Stat icon={Wallet} value={`${currency.format(overview.value.revenue_total)} دج`} label="إجمالي الإيرادات" tone="gold" />
             <Stat icon={TrendingUp} value={`${currency.format(overview.value.revenue_30d)} دج`} label="إيرادات (30 يوم)" tone="gold" />
             <Stat icon={Star} value={overview.value.avg_rating.toFixed(1)} label="متوسط التقييم" tone="gold" />
-            <Stat icon={Clock} value={formatHours(overview.value.total_watch_seconds)} label="إجمالي وقت المشاهدة" tone="teal" />
+            <Stat icon={Clock} value={formatHoursMinutes(overview.value.total_watch_seconds)} label="إجمالي وقت المشاهدة" tone="teal" />
           </div>
 
           <Card>
@@ -72,6 +67,7 @@ export default async function AdminAnalyticsPage() {
             {!popularCourses?.value.length ? (
               <p className="p-lg text-[13.5px] text-text-muted-light">لا توجد بيانات بعد</p>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full text-[13.5px]">
                 <thead>
                   <tr>
@@ -96,6 +92,7 @@ export default async function AdminAnalyticsPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </Card>
         </>

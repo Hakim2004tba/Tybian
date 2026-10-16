@@ -40,7 +40,12 @@ export function AdminTable<T>({
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={rowKey(row)} className="transition-colors hover:bg-bg-light">
+            <tr
+              key={rowKey(row)}
+              /* group/row lets a cell reveal an action on hover — see
+                 the promote button in app/admin/students. */
+              className="group/row transition-colors hover:bg-bg-light"
+            >
               {columns.map((col) => (
                 <td key={col.header} className={`border-b border-border-light px-4 py-3.5 ${col.className ?? ""}`}>
                   {col.cell(row)}

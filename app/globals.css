@@ -3,6 +3,116 @@
 @tailwind utilities;
 
 /* ==========================================================================
+   THEME
+   The light and dark values behind every `-light` token in
+   tailwind.config.ts. See the long note there for why the names still
+   say "light".
+
+   Channels, not finished colours: Tailwind composes them as
+   `rgb(var(--c-x) / <alpha>)`, so `bg-surface-light/70` keeps working.
+
+   The dark palette is the platform's own `bg.dark` / `surface.dark` /
+   `border.dark` family — the same colours the hero and the lesson
+   player already use. Dark mode is therefore not a new palette invented
+   for the occasion; it is the one half of the design system that was
+   already there, applied to the rest of the app.
+   ========================================================================== */
+:root {
+  color-scheme: light;
+
+  --c-bg: 247 246 251;
+  --c-surface: 255 255 255;
+  --c-border: 228 225 239;
+
+  --c-text-primary: 23 15 46;
+  --c-text-secondary: 86 79 114;
+  --c-text-muted: 148 140 176;
+
+  --c-academy-deep: 44 30 78;
+  --c-academy-deeper: 35 23 65;
+  --c-academy-deepest: 27 17 52;
+  --c-academy-lavender: 219 216 223;
+  --c-academy-lavender-soft: 231 229 235;
+  --c-academy-lavender-deep: 201 197 210;
+}
+
+.dark {
+  /*
+    Tells the browser the page is dark, which is what makes scrollbars,
+    form controls, and the space behind a rubber-band scroll dark too.
+    Without it those stay light and the page has bright seams at every
+    edge the CSS does not paint.
+  */
+  color-scheme: dark;
+
+  --c-bg: 10 7 20;
+  --c-surface: 20 16 31;
+  --c-border: 46 39 72;
+
+  --c-text-primary: 245 243 255;
+  --c-text-secondary: 180 173 209;
+  --c-text-muted: 124 116 153;
+
+  /*
+    The rail and the content ground converge. In light mode they are a
+    deliberate dark/light pair; in dark mode a deep-purple rail against a
+    near-black page would read as a panel stuck onto the screen, so the
+    rail steps only slightly out of the background and the border does
+    the separating.
+  */
+  --c-academy-deep: 22 17 36;
+  --c-academy-deeper: 18 14 30;
+  --c-academy-deepest: 14 11 24;
+  --c-academy-lavender: 10 7 20;
+  --c-academy-lavender-soft: 20 16 31;
+  --c-academy-lavender-deep: 46 39 72;
+}
+
+/*
+  `bg-white` is not a token — it is Tailwind's fixed white, and the app
+  uses it for about ninety card surfaces. It cannot be turned into a
+  variable, because the SAME colour is `text-white` on the purple
+  buttons, which must stay white in both themes.
+
+  So the card surfaces are overridden by name, and only the ones that
+  are card surfaces. The low-opacity whites (`bg-white/10`, `/5`,
+  `border-white/10` …) are deliberately left alone: those are overlays
+  on surfaces that are dark in BOTH themes, and lightening them is how
+  a rail's inner card would turn into a grey smear.
+*/
+.dark .bg-white,
+.dark .bg-white\/95,
+.dark .bg-white\/85,
+.dark .bg-white\/80,
+.dark .focus\:bg-white:focus,
+.dark .hover\:bg-white:hover {
+  background-color: rgb(var(--c-surface));
+}
+
+.dark .hover\:bg-white\/70:hover {
+  background-color: rgb(var(--c-surface) / 0.7);
+}
+
+.dark .border-white,
+.dark .border-white\/70,
+.dark .border-white\/60 {
+  border-color: rgb(var(--c-border));
+}
+
+/*
+  Shadows are tuned for a light page: a soft violet-grey that simply
+  disappears on a dark one, taking the separation between a card and its
+  background with it. On dark, depth comes from a near-black shadow plus
+  a hairline of light at the top edge — the same way the platform's own
+  dark sections already read.
+*/
+.dark .shadow-sm,
+.dark .shadow-md,
+.dark .shadow-lg {
+  --tw-shadow-color: rgba(0, 0, 0, 0.55);
+}
+
+/* ==========================================================================
    TIBYAN — Global base layer
    Visual language is fixed by /docs/DESIGN_SYSTEM.md. This file wires that
    system into Tailwind's base layer; it does not introduce new choices.
@@ -19,11 +129,20 @@
      flex row that doesn't wrap, a decorative element not fully
      clipped), the WHOLE page becomes horizontally scrollable — which
      is exactly what makes a page look "shifted/broken" on a phone even
-     though each individual component looks fine in isolation. This
-     clamps that class of bug at the root instead of chasing it file by
-     file across the entire app. */
-  html,
-  body {
+     though each individual component looks fine in isolation.
+
+     `overflow-x: hidden` is applied to <html> ONLY, never to <body>.
+     Setting it on body makes body a scroll container, and every
+     `position: sticky` descendant then sticks to body's scroll box
+     instead of the viewport — which silently broke the dashboard and
+     admin sidebars: they scrolled away with the page instead of
+     staying put. Keeping the clamp on <html> gives the same protection
+     without creating that scroll container.
+
+     `overflow-y` is deliberately left alone here; naming only the x
+     axis avoids the computed `overflow: hidden auto` that caused the
+     problem. */
+  html {
     overflow-x: hidden;
   }
 
@@ -119,20 +238,275 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
+    /* Multi-stop, and fading to the same colour at zero alpha rather
+       than to `transparent` — see the note on .glow-gold below for why
+       the two-stop version banded. */
     background: radial-gradient(
-      circle at 60% 40%,
-      rgba(108, 76, 241, 0.35) 0%,
-      transparent 65%
+      ellipse 110% 85% at 60% 40%,
+      rgba(108, 76, 241, 0.34) 0%,
+      rgba(108, 76, 241, 0.22) 30%,
+      rgba(108, 76, 241, 0.10) 55%,
+      rgba(108, 76, 241, 0.03) 78%,
+      rgba(108, 76, 241, 0) 100%
     );
   }
+  /*
+    The "best value" card's warm wash.
+
+    TWO STOPS CAUSE BANDING. A gradient from a colour straight to
+    `transparent` is interpolated in premultiplied sRGB, and over a
+    light surface the falloff crosses very few distinct 8-bit values —
+    so it renders as visible rings rather than a fade. On the gold
+    card that read as a patchy blotch rather than a glow.
+
+    Two things fix it. The stops are spelled out so the curve eases
+    instead of running linearly to nothing, and the end colour is the
+    SAME gold at zero alpha rather than the keyword `transparent`
+    (which is rgba(0,0,0,0) and drags the midpoints toward grey).
+    Lower peak alpha too: on a white card this only needs to be felt,
+    not seen.
+  */
   .glow-gold {
     position: absolute;
     inset: 0;
     pointer-events: none;
     background: radial-gradient(
-      circle at 50% 30%,
-      rgba(232, 184, 75, 0.25) 0%,
-      transparent 65%
+      ellipse 120% 90% at 50% 12%,
+      rgba(232, 184, 75, 0.20) 0%,
+      rgba(232, 184, 75, 0.13) 32%,
+      rgba(232, 184, 75, 0.06) 58%,
+      rgba(232, 184, 75, 0.02) 78%,
+      rgba(232, 184, 75, 0) 100%
     );
+  }
+
+
+  /*
+    A scroll container that scrolls without drawing a bar.
+
+    The student rail is a fixed-height column whose contents can exceed
+    it on a short laptop screen. It still has to scroll — but a grey
+    track running down the middle of the dark rail reads as a seam
+    between two panels, not as a control. The content is reachable by
+    wheel, trackpad, touch and keyboard exactly as before.
+  */
+  .scrollbar-none {
+    scrollbar-width: none;          /* Firefox */
+    -ms-overflow-style: none;       /* old Edge */
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;                  /* WebKit */
+  }
+}
+
+/*
+  PDF.js text layer.
+  ------------------------------------------------------------------
+  The layer is a stack of absolutely positioned transparent spans laid
+  exactly over the glyphs drawn on the canvas beneath. It is what makes
+  a rendered PDF selectable, and selection is what the highlighter
+  needs — see components/library/PdfPageView.tsx.
+
+  These rules are not decoration. `color: transparent` is what keeps the
+  spans invisible while still selectable; without `transform-origin` and
+  the per-span `--scale-factor`, PDF.js's own inline transforms land in
+  the wrong place and the selection rectangle sits a line above or below
+  the words it covers. They are inlined here rather than imported from
+  pdfjs-dist/web/pdf_viewer.css because that stylesheet also restyles a
+  whole viewer chrome this app does not render.
+*/
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+/* The marker PDF.js appends to measure the end of a line. */
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: -1;
+  cursor: default;
+  user-select: none;
+}
+
+.textLayer ::selection {
+  background: rgba(108, 76, 241, 0.3);
+}
+
+/* ==========================================================================
+   THE DOCKED AI PANEL
+
+   When the assistant is docked, the page must make room for it rather
+   than sit underneath it — a panel that covers the lesson a student is
+   asking about is worse than no panel.
+
+   The panel is position:fixed, so nothing reflows around it on its own.
+   Padding on <body> is what shrinks the document: the student shell is
+   a flex row inside it, so the sidebar and the content column both give
+   up the width together, and the sticky rail keeps working.
+
+   Elements that are themselves fixed do not feel that padding — they
+   are positioned against the viewport. The two floating launchers carry
+   .ai-dock-shift and are moved explicitly.
+
+   md and up only. Below that the docked form is a bottom sheet, which
+   takes height rather than width.
+   ========================================================================== */
+:root {
+  --ai-dock-w: 380px;
+}
+
+@media (min-width: 768px) {
+  .ai-docked body {
+    padding-inline-end: var(--ai-dock-w);
+  }
+
+  /* Two classes deep, so it beats Tailwind's own `end-6` / `md:end-8`
+     without !important. */
+  .ai-docked .ai-dock-shift {
+    inset-inline-end: calc(2rem + var(--ai-dock-w));
+  }
+}
+
+/*
+  The width change is worth animating: the content sliding over is what
+  makes the panel read as part of the page rather than something that
+  appeared on top of it. Skipped for anyone who asked for less motion.
+*/
+@media (min-width: 768px) and (prefers-reduced-motion: no-preference) {
+  body {
+    transition: padding-inline-end 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .ai-dock-shift {
+    transition: inset-inline-end 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* ==========================================================================
+   DRAWING OVER A PAGE
+
+   While a pen or marker is armed, the invisible text layer must get out
+   of the way completely: not just stop taking the pointer (the ink
+   canvas above it already does that) but stop selecting, or dragging a
+   nib across a paragraph leaves a trail of blue selection behind the
+   line. The ink canvases themselves are lifted above `.textLayer`'s
+   z-index in InkLayer.tsx.
+   ========================================================================== */
+.ink-armed .textLayer {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ==========================================================================
+   THE FEATURE CAROUSEL
+
+   Two keyframes it cannot get from the Tailwind config: one is used
+   through an arbitrary-value utility, the other from an inline style on
+   a remounting element (see FeatureCarousel for why the progress bar is
+   keyed).
+
+   Both are wrapped in a reduced-motion guard rather than relying on
+   `motion-safe:`, because the inline one carries no class to guard.
+   ========================================================================== */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(var(--slide-from, 2.5rem));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Enters from the side the language starts on. */
+:root {
+  --slide-from: 2.5rem;
+}
+[dir="rtl"] {
+  --slide-from: -2.5rem;
+}
+
+@keyframes dotFill {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*="dotFill"] {
+    animation: none !important;
+    width: 100% !important;
+  }
+}
+
+/* The lesson's "watch the course" card, entering once on open. */
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ==========================================================================
+   NO SIDEWAYS SCROLL, EVER
+
+   One stray element wider than the screen — a long unbroken word, a
+   table, a decorative blur — drags the WHOLE page sideways on a phone,
+   and the symptom appears on a page that has nothing to do with the
+   element causing it. Every real offender is still fixed at its source;
+   this is the floor under them, so a future one is a clipped edge
+   instead of a broken page.
+
+   `clip`, not `hidden`: `overflow: hidden` turns the element into a
+   scroll container, which makes every `position: sticky` descendant
+   stick to IT instead of the viewport — the dashboard and admin rails
+   both depend on sticking to the viewport. `clip` cuts the overflow
+   without creating that container. Browsers too old for `clip` simply
+   ignore this and behave as before.
+   ========================================================================== */
+body {
+  overflow-x: clip;
+}
+
+/* A long email, URL or file name is the most common single cause. */
+body {
+  overflow-wrap: break-word;
+}
+
+/* Focus mode arriving — the room dimming, not a panel sliding in. */
+@keyframes focusIn {
+  from {
+    opacity: 0;
+    transform: scale(1.015);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }

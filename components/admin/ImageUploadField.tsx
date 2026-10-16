@@ -3,14 +3,13 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import { Upload, X, Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 
 /**
- * Uploads directly from the browser to Supabase Storage — same
- * "don't proxy large files through our own server" principle as the
- * Bunny video upload widget. The admin's own session already satisfies
- * the bucket's RLS write policy (`*_admin_write`, 0028), so no signed
- * URL or server round-trip is needed first.
+ * Uploads an image through /api/admin/upload, which writes it to the
+ * server's own disk. Supabase Storage is gone, and with it the
+ * browser-direct upload — a 5 MB cover image through the server is a
+ * fair trade for not running a storage service. Bunny still takes video
+ * uploads straight from the browser; that flow is untouched.
  *
  * Renders a hidden `<input type="hidden" name={name}>` holding the
  * resulting public URL, so it plugs directly into existing
@@ -47,24 +46,33 @@ export function ImageUploadField({
     setError(null);
     setUploading(true);
 
-    const supabase = createClient();
-    const ext = file.name.split(".").pop() || "jpg";
-    const path = `${crypto.randomUUID()}.${ext}`;
+    // The filename is not sent: the route names the file itself from a
+    // uuid and picks the extension from the MIME type, so nothing
+    // attacker-controlled reaches the filesystem.
+    const body = new FormData();
+    body.append("file", file);
+    body.append("bucket", bucket);
 
-    const { error: uploadError } = await supabase.storage.from(bucket).upload(path, file, {
-      upsert: true,
-      contentType: file.type,
-    });
+    try {
+      const res = await fetch("/api/admin/upload", { method: "POST", body });
 
-    if (uploadError) {
-      setError("تعذّر رفع الصورة: " + uploadError.message);
+      if (!res.ok) {
+        const messages: Record<string, string> = {
+          too_large: "الحجم الأقصى للصورة 5 ميجابايت",
+          bad_type: "صيغة الصورة غير مدعومة — استخدم JPG أو PNG أو WebP",
+        };
+        const { error: code } = await res.json().catch(() => ({ error: "" }));
+        setError(messages[code] ?? "تعذّر رفع الصورة، حاول مجدداً");
+        return;
+      }
+
+      const { url: uploadedUrl } = await res.json();
+      setUrl(uploadedUrl);
+    } catch {
+      setError("تعذّر الاتصال بالخادم أثناء رفع الصورة");
+    } finally {
       setUploading(false);
-      return;
     }
-
-    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-    setUrl(data.publicUrl);
-    setUploading(false);
   }
 
   return (

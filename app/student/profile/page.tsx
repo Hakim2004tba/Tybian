@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { queryOne } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth/session";
 import { getAcademicYears } from "@/lib/data/academic-years";
 import { Container } from "@/components/layout/Container";
@@ -9,16 +9,18 @@ import { SignOutButton } from "@/components/auth/SignOutButton";
 
 export default async function ProfilePage() {
   const user = await getSessionUser();
-  const supabase = await createClient();
-
-  // RLS (0009_rls_policies.sql, profiles_select_own_or_admin) guarantees
-  // this only ever returns the caller's own row, or every row for admins
-  // — never another student's data — regardless of what id we filter by.
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, phone, academic_year_id")
-    .eq("id", user!.id)
-    .single();
+  // `id = ?` bound to the session's own user is now the only thing
+  // scoping this read. profiles_select_own_or_admin used to guarantee it
+  // "regardless of what id we filter by"; it does not exist any more, so
+  // the id must come from the session and never from the URL.
+  const profile = await queryOne<{
+    full_name: string;
+    phone: string | null;
+    academic_year_id: string | null;
+  }>(
+    `SELECT full_name, phone, academic_year_id FROM profiles WHERE id = ?`,
+    [user!.id]
+  );
 
   const academicYears = await getAcademicYears();
 

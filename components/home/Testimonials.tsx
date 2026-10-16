@@ -4,6 +4,8 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/ui/Reveal";
 import { getHomepageTestimonials } from "@/lib/data/homepage";
+import { getDictionary } from "@/lib/i18n/locale";
+import { SectionAura } from "@/components/home/SectionAura";
 
 /**
  * Real reviews only — pulled from students who actually rated a course
@@ -14,19 +16,20 @@ import { getHomepageTestimonials } from "@/lib/data/homepage";
  */
 export async function Testimonials() {
   const testimonials = await getHomepageTestimonials(3);
+  const { dict } = await getDictionary();
+  const copy = dict.home.testimonials;
   if (testimonials.length === 0) return null;
 
   return (
-    <section className="bg-bg-dark py-4xl">
+    <section className="relative isolate overflow-hidden bg-bg-dark py-4xl">
+      <SectionAura tone="dark" />
       <Container>
         <Reveal className="text-center">
-          <Badge variant="teal">آراء الطلبة</Badge>
-          <h2 className="mx-auto mt-4 max-w-lg text-text-primary-dark">
-            ماذا يقول طلبة الطب عن تبيان
-          </h2>
+          <Badge variant="teal">{copy.badge}</Badge>
+          <h2 className="mx-auto mt-4 max-w-lg text-text-primary-dark">{copy.title}</h2>
         </Reveal>
 
-        <div className="mt-10 grid gap-5 md:grid-cols-3">
+        <div className="mt-7 grid gap-4 md:mt-10 md:gap-5 md:grid-cols-3">
           {testimonials.map((t, i) => (
             <Reveal key={t.id} delay={i * 80}>
               <Card tone="dark" className="h-full">

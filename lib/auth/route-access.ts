@@ -64,3 +64,18 @@ export function getRedirectFor(role: AppRole | null, pathname: string): string {
   }
   return "/unauthorized";
 }
+
+/**
+ * Where a signed-in person belongs when they open the site's root.
+ *
+ * Written once here because three places need the same answer — the
+ * navbar's account link, the post-sign-in redirect, and "/" itself —
+ * and a student sent to /teacher by one of them would be a permissions
+ * bug expressed as a link.
+ */
+export function homePathFor(role: AppRole | null): string {
+  if (role === "admin") return "/admin";
+  if (role === "teacher") return "/teacher";
+  if (role === "student") return "/dashboard";
+  return "/";
+}

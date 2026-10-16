@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Search, Menu, User } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { SignOutButton } from "@/components/auth/SignOutButton";
 import { Logo } from "@/components/layout/Logo";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { cn } from "@/lib/utils";
 import type { AppRole } from "@/lib/auth/route-access";
 import type { Dictionary, Locale } from "@/lib/i18n/dictionaries";
@@ -43,6 +45,28 @@ export function Navbar({
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
 
+  /*
+    The homepage hero is a full-bleed artwork, so the bar floats ON it
+    rather than sitting in a grey strip above it (the reference the
+    owner gave). Everywhere else the page starts with ordinary content,
+    where a see-through bar would leave the links unreadable the moment
+    they crossed a card — so those pages keep the solid bar and get a
+    spacer standing in for the now-fixed header.
+  */
+  const overlay = pathname === "/";
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    if (!overlay) return;
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [overlay]);
+
+  // Transparent only while the hero is actually behind the bar.
+  const transparent = overlay && !scrolled && !mobileOpen;
+
   const navItems = [
     { href: "/", label: dict.nav.home },
     { href: "/courses", label: dict.nav.courses },
@@ -52,7 +76,15 @@ export function Navbar({
   ];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border-dark bg-bg-dark/75 backdrop-blur-xl">
+    <>
+    <header
+      className={cn(
+        "fixed inset-x-0 top-0 z-40 transition-colors duration-300",
+        transparent
+          ? "border-b border-transparent bg-transparent"
+          : "border-b border-border-dark bg-bg-dark/75 backdrop-blur-xl"
+      )}
+    >
       <div className="mx-auto flex max-w-content items-center justify-between px-md py-[18px] md:px-xl">
         <Logo tone="dark" />
 
@@ -81,7 +113,9 @@ export function Navbar({
 
         {/* Right-side actions */}
         <div className="flex items-center gap-2">
-          <div className="hidden md:block">
+          {/* flex, not block — see the note in StudentTopbar. */}
+          <div className="hidden items-center gap-2 md:flex">
+            <ThemeToggle compact />
             <LanguageSwitcher currentLocale={locale} />
           </div>
 
@@ -100,11 +134,21 @@ export function Navbar({
             {isAuthenticated ? dict.nav.account : dict.nav.login}
           </Link>
 
-          <Link href="/register" className="hidden md:block">
-            <Button variant="primary" size="sm" className="shadow-[0_4px_16px_rgba(108,76,241,0.35)]">
-              {dict.nav.register}
-            </Button>
-          </Link>
+          {/* Signed-out visitors get "register"; signed-in ones get a way
+              out. Sign-out previously existed only on /student/profile,
+              which meant a logged-in teacher or admin had no reachable
+              way to end their session at all. */}
+          {isAuthenticated ? (
+            <div className="hidden md:block">
+              <SignOutButton />
+            </div>
+          ) : (
+            <Link href="/register" className="hidden md:block">
+              <Button variant="primary" size="sm" className="shadow-[0_4px_16px_rgba(108,76,241,0.35)]">
+                {dict.nav.register}
+              </Button>
+            </Link>
+          )}
 
           {/* Mobile trigger */}
           <button
@@ -125,5 +169,9 @@ export function Navbar({
         dict={dict}
       />
     </header>
+    {/* The header no longer occupies space, so every page except the
+        homepage needs its height back. */}
+    {!overlay && <div aria-hidden className="h-[77px]" />}
+    </>
   );
 }

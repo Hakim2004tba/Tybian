@@ -3,20 +3,24 @@ import { Container } from "@/components/layout/Container";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Reveal } from "@/components/ui/Reveal";
+import { YearCard } from "@/components/home/YearCard";
 import { getAcademicYears } from "@/lib/data/academic-years";
 import { getAcademicYearCourseCounts } from "@/lib/data/homepage";
+import { getDictionary } from "@/lib/i18n/locale";
+import { SectionAura } from "@/components/home/SectionAura";
 
-// Static per-year curriculum blurbs — genuine domain knowledge about
-// what each year of the Algerian medical curriculum generally covers,
-// not platform data, so no DB backing needed for these specifically.
-const yearBlurbs: Record<number, { fr: string; desc: string }> = {
-  1: { fr: "1ère année", desc: "التشريح العام، الكيمياء الحيوية، الفيزياء الطبية" },
-  2: { fr: "2ème année", desc: "علم وظائف الأعضاء، الأنسجة، الأجنة" },
-  3: { fr: "3ème année", desc: "الفيزيولوجيا المرضية، علم الأدوية، المناعة" },
-  4: { fr: "4ème année", desc: "الأمراض الباطنية، بداية التداول السريري" },
-  5: { fr: "5ème année", desc: "الجراحة العامة، النسائية والتوليد" },
-  6: { fr: "6ème année", desc: "طب الأطفال، الطب الباطني المتقدم" },
-  7: { fr: "7ème année", desc: "التداول الشامل، التحضير لمناقشة التخرج" },
+// The French year label is the same in both languages — it is what the
+// faculty itself calls the year. The curriculum blurb beside it is real
+// domain knowledge rather than platform data, so it lives in the
+// dictionary (dict.home.years.blurbs) and not in the database.
+const yearLabels: Record<number, string> = {
+  1: "1ère année",
+  2: "2ème année",
+  3: "3ème année",
+  4: "4ème année",
+  5: "5ème année",
+  6: "6ème année",
+  7: "7ème année",
 };
 
 /**
@@ -27,40 +31,50 @@ const yearBlurbs: Record<number, { fr: string; desc: string }> = {
  */
 export async function AcademicYears() {
   const [years, counts] = await Promise.all([getAcademicYears(), getAcademicYearCourseCounts()]);
+  const { locale, dict } = await getDictionary();
+  const t = dict.home.years;
 
   return (
-    <section className="bg-bg-light py-4xl">
+    <section className="relative isolate overflow-hidden bg-bg-light py-4xl">
+      <SectionAura tone="light" />
       <Container>
-        <Reveal>
-          <Badge variant="violet">السنوات الدراسية</Badge>
-          <h2 className="mt-4 max-w-lg">محتوى منظّم من السنة الأولى إلى السابعة</h2>
-          <p className="mt-2 max-w-xl text-text-secondary-light">
-            كل سنة دراسية تضم مقاييسها الكاملة، من المقررات الأساسية إلى
-            التداول السريري في السنوات النهائية.
+        <Reveal className="text-center md:text-start">
+          <Badge variant="violet">{t.badge}</Badge>
+          <h2 className="mx-auto mt-4 max-w-lg md:mx-0">{t.title}</h2>
+          <p className="mx-auto mt-2 max-w-xl text-text-secondary-light md:mx-0">
+            {t.body}
           </p>
         </Reveal>
 
-        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Two per row on a phone. Seven full-width cards made this one
+            section roughly nine screens tall, which is what "everything is
+            stacked lengthwise" meant. */}
+        <div className="mt-7 grid grid-cols-2 gap-3 md:mt-10 md:gap-5 lg:grid-cols-4">
           {years.map((y, i) => {
-            const blurb = yearBlurbs[y.year_number];
+            const label = yearLabels[y.year_number];
+            // The blurb is keyed by year number in the dictionary.
+            const blurb = t.blurbs[y.year_number as keyof typeof t.blurbs];
+            // academic_years carries a real English name; fall back to
+            // the Arabic one rather than showing an empty card if a row
+            // was created without it.
+            const yearName = locale === "en" ? (y.name_en ?? y.name_ar) : y.name_ar;
             const count = counts[y.year_number] ?? 0;
             return (
               <Reveal key={y.id} delay={i * 60}>
-                <Link href={`/courses?year=${y.id}`}>
-                  <Card interactive className="h-full cursor-pointer">
-                    <div className="flex items-start justify-between">
-                      <span className="num text-sm font-bold text-primary">
-                        {String(y.year_number).padStart(2, "0")}
-                      </span>
-                      {blurb && <span className="num text-[11px] text-text-muted-light">{blurb.fr}</span>}
-                    </div>
-                    <h3 className="mt-3">{y.name_ar}</h3>
-                    {blurb && <p className="mt-1.5 text-[14px] text-text-secondary-light">{blurb.desc}</p>}
-                    <div className="mt-4 text-[13px] text-text-muted-light">
-                      <span className="num">{count}</span> {count === 1 ? "مقياس" : "مقاييس"}
-                    </div>
-                  </Card>
-                </Link>
+                <YearCard
+                  href={`/courses?year=${y.id}`}
+                  number={y.year_number}
+                  label={label}
+                  name={yearName}
+                  blurb={blurb}
+                  count={count}
+                  labels={{
+                    soon: t.soon,
+                    soonHint: t.soonHint,
+                    subjectOne: t.subjectOne,
+                    subjectMany: t.subjectMany,
+                  }}
+                />
               </Reveal>
             );
           })}

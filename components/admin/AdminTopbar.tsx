@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Menu, Search, Bell } from "lucide-react";
 import { AdminMobileNav } from "@/components/admin/AdminMobileNav";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 
 export function AdminTopbar({
   name,
@@ -31,6 +32,8 @@ export function AdminTopbar({
         </div>
 
         <div className="flex items-center gap-4">
+          <LanguageSwitcher />
+
           <button
             aria-label="الإشعارات"
             className="hidden h-9 w-9 items-center justify-center rounded-md text-text-secondary-light transition-colors hover:bg-primary/10 hover:text-primary lg:flex"

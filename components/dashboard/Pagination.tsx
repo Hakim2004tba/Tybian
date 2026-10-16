@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 /**
  * Pure Link-based pagination — no "use client", no JS shipped for this
@@ -30,6 +33,7 @@ export function Pagination({
   basePath: string;
   currentParams: Record<string, string | undefined>;
 }) {
+  const { t } = useI18n();
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   if (totalPages <= 1) return null;
 
@@ -44,13 +48,13 @@ export function Pagination({
 
   return (
     <div className="mt-4 flex items-center justify-center gap-1.5">
-      <PageLink href={hrefFor(page - 1)} disabled={page <= 1} label="السابق">
+      <PageLink href={hrefFor(page - 1)} disabled={page <= 1} label={t.dash.common.prev}>
         <ChevronRight size={14} />
       </PageLink>
       <span className="num px-2 text-[12.5px] text-text-muted-light">
         {page} / {totalPages}
       </span>
-      <PageLink href={hrefFor(page + 1)} disabled={page >= totalPages} label="التالي">
+      <PageLink href={hrefFor(page + 1)} disabled={page >= totalPages} label={t.dash.common.next}>
         <ChevronLeft size={14} />
       </PageLink>
     </div>

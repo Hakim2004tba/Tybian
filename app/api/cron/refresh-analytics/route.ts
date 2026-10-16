@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { query } from "@/lib/db";
+import { refreshCourseAnalytics, refreshPlatformAnalytics } from "@/lib/analytics/refresh";
 
 /**
  * POST /api/cron/refresh-analytics
@@ -21,33 +22,52 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const admin = createAdminClient();
-
-  const { error: platformError } = await admin.rpc("refresh_platform_analytics");
-  if (platformError) {
-    return NextResponse.json({ error: "platform_refresh_failed", detail: platformError.message }, { status: 500 });
+  try {
+    await refreshPlatformAnalytics();
+  } catch (error) {
+    return NextResponse.json(
+      { error: "platform_refresh_failed", detail: (error as Error).message },
+      { status: 500 }
+    );
   }
 
-  const { data: courses, error: coursesError } = await admin
-    .from("courses")
-    .select("id")
-    .eq("status", "published")
-    .is("deleted_at", null);
-
-  if (coursesError) {
-    return NextResponse.json({ error: "course_list_failed", detail: coursesError.message }, { status: 500 });
+  let courses: { id: string }[];
+  try {
+    courses = await query<{ id: string }>(
+      `SELECT id FROM courses WHERE status = 'published' AND deleted_at IS NULL`
+    );
+  } catch (error) {
+    return NextResponse.json(
+      { error: "course_list_failed", detail: (error as Error).message },
+      { status: 500 }
+    );
   }
 
-  const results = await Promise.allSettled(
-    (courses ?? []).map((c) => admin.rpc("refresh_course_analytics", { p_course_id: c.id }))
-  );
+  /*
+    Sequential, not Promise.allSettled over every course at once.
+
+    The pool holds five connections; firing one refresh per course in
+    parallel would queue them all behind it anyway, and each refresh runs
+    several aggregate queries. On shared hosting that is the shape of a
+    request that times out halfway and leaves the snapshots half stale.
+  */
+  const results: PromiseSettledResult<void>[] = [];
+  for (const c of courses) {
+    try {
+      await refreshCourseAnalytics(c.id);
+      results.push({ status: "fulfilled", value: undefined });
+    } catch (reason) {
+      console.error("refresh-analytics: course failed", { courseId: c.id, reason });
+      results.push({ status: "rejected", reason });
+    }
+  }
 
   const failedCount = results.filter((r) => r.status === "rejected").length;
 
   return NextResponse.json({
     ok: true,
     platformRefreshed: true,
-    coursesRefreshed: (courses ?? []).length - failedCount,
+    coursesRefreshed: courses.length - failedCount,
     coursesFailed: failedCount,
   });
 }

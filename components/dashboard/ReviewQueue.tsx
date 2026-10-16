@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { getSessionUser } from "@/lib/auth/session";
 import { getDueReviews } from "@/lib/data/study-tools";
 import { ReviewRatingButtons } from "@/components/dashboard/ReviewRatingButtons";
+import { getDictionary } from "@/lib/i18n/locale";
 
 /**
  * Every lesson a student has ever completed automatically enters this
@@ -14,6 +15,8 @@ import { ReviewRatingButtons } from "@/components/dashboard/ReviewRatingButtons"
  * algorithm tested in tests/study-tools.test.ts.
  */
 export async function ReviewQueue() {
+  const { dict } = await getDictionary();
+  const t = dict.dash;
   const user = await getSessionUser();
   const reviews = await getDueReviews(user!.id);
 
@@ -22,10 +25,10 @@ export async function ReviewQueue() {
       <Card>
         <h3 className="flex items-center gap-2 text-[15px]">
           <BrainCircuit size={17} />
-          المراجعة المتباعدة
+          {t.review.title}
         </h3>
         <p className="mt-2 text-[13px] text-text-muted-light">
-          لا توجد دروس بحاجة لمراجعة اليوم — أحسنت! ستظهر هنا الدروس التي أكملتها تلقائياً عند حان وقت مراجعتها.
+          {t.review.empty}
         </p>
       </Card>
     );
@@ -36,9 +39,9 @@ export async function ReviewQueue() {
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-light p-lg pb-4">
         <h3 className="flex items-center gap-2 text-[15px]">
           <BrainCircuit size={17} />
-          المراجعة المتباعدة
+          {t.review.title}
         </h3>
-        <Badge variant="violet">{reviews.length} بحاجة لمراجعة</Badge>
+        <Badge variant="violet">{reviews.length} {t.review.needsReview}</Badge>
       </div>
 
       <div className="flex flex-col divide-y divide-border-light">

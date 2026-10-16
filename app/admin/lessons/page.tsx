@@ -1,3 +1,5 @@
+import { Paperclip } from "lucide-react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { AdminTable } from "@/components/admin/AdminTable";
@@ -45,6 +47,18 @@ export default async function AdminLessonsPage({
             { header: "القسم", cell: (l) => l.sectionTitle ?? "—" },
             { header: "الفيديو", cell: (l) => <Badge variant={l.hasVideo ? "success" : "muted"}>{l.hasVideo ? "مرفق" : "غير مرفق"}</Badge> },
             { header: "المعاينة", cell: (l) => l.is_free_preview ? <Badge variant="teal">مجانية</Badge> : <span className="text-text-muted-light">—</span> },
+            {
+              header: "المرفقات",
+              cell: (l) => (
+                <Link
+                  href={`/admin/lessons/${l.id}/resources`}
+                  className="inline-flex items-center gap-1.5 text-[13px] text-primary hover:underline"
+                >
+                  <Paperclip size={13} />
+                  {l.resourceCount > 0 ? <span className="num">{l.resourceCount}</span> : "أضف"}
+                </Link>
+              ),
+            },
           ]}
         />
       </Card>

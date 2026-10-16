@@ -33,6 +33,7 @@ export default async function EditCoursePage({
   const prices = (course.course_prices ?? []) as {
     plan_type: string;
     price: number;
+    duration_days: number | null;
     is_active: boolean;
   }[];
   const threeMonths = prices.find((p) => p.plan_type === "three_months" && p.is_active);
@@ -112,6 +113,8 @@ export default async function EditCoursePage({
           courseId={id}
           threeMonthsPrice={threeMonths?.price ?? null}
           lifetimePrice={lifetime?.price ?? null}
+          durationDays={threeMonths?.duration_days ?? null}
+          lifetimeDurationDays={lifetime?.duration_days ?? null}
         />
       </Card>
     </div>

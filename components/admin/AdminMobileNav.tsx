@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDrawerPresence } from "@/lib/ui/drawer-presence";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
@@ -30,14 +31,22 @@ export function AdminMobileNav({
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
+
+  // Unmounted while closed: a parked fixed drawer widens the layout
+  // viewport on phones. See lib/ui/drawer-presence. Called before any
+  // early return — a hook after a conditional `return` runs on some
+  // renders and not others, which is exactly what breaks React's
+  // hook ordering.
+  const { present, shown } = useDrawerPresence(open);
+
+  if (!mounted || !present) return null;
 
   return createPortal(
     <>
       <div
         className={cn(
           "fixed inset-0 z-50 bg-black/60 transition-opacity duration-200 lg:hidden",
-          open ? "opacity-100" : "pointer-events-none opacity-0"
+          shown ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={onClose}
         aria-hidden="true"
@@ -45,7 +54,7 @@ export function AdminMobileNav({
       <div
         className={cn(
           "fixed inset-y-0 right-0 z-50 flex w-[82%] max-w-[300px] flex-col gap-6 bg-bg-dark p-lg transition-transform duration-200 ease-out lg:hidden",
-          open ? "translate-x-0" : "translate-x-full"
+          shown ? "translate-x-0" : "translate-x-full"
         )}
         role="dialog"
         aria-modal="true"

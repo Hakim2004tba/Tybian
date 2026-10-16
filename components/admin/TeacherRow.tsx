@@ -8,6 +8,7 @@ import { ImageUploadField } from "@/components/admin/ImageUploadField";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { SubmitButton } from "@/components/auth/SubmitButton";
+import { ShareForm } from "@/components/admin/teachers/ShareForm";
 
 export type TeacherRowData = {
   id: string;
@@ -19,6 +20,18 @@ export type TeacherRowData = {
   rating: number;
   students_count: number;
   courses_count: number;
+  /** Successful payments only — admin grants and full coupons excluded. */
+  revenue: number;
+  paidOrders: number;
+  /** The agreed cut, and what it comes to. Null before migration 20. */
+  earnings: {
+    percent: number;
+    grossSales: number;
+    payout: number;
+    platform: number;
+    sales: number;
+  } | null;
+  lastSaleAt: string | null;
   fullName: string;
   avatarUrl: string | null;
 };
@@ -86,9 +99,49 @@ export function TeacherRow({ teacher }: { teacher: TeacherRowData }) {
 
         <div className="num flex items-center gap-4 text-[12.5px] text-text-muted-light">
           <span>{teacher.courses_count} دورة</span>
-          <span>{teacher.students_count} طالب</span>
+          <span className="font-semibold text-text-primary-light">
+            {teacher.students_count} طالب
+          </span>
           <span>★ {Number(teacher.rating).toFixed(1)}</span>
+
+          {/*
+            THE MONEY, and what it deliberately excludes.
+
+            Successful payments only. A student given access by an admin
+            or a full-discount coupon produces an enrolment and no
+            payment, so free access never inflates this — which is the
+            distinction that makes the number usable for settling with a
+            teacher rather than merely impressive.
+          */}
+          <span className="num font-semibold text-success">
+            {new Intl.NumberFormat("en-US").format(teacher.revenue)} دج
+          </span>
+          <span className="num">{teacher.paidOrders} عملية</span>
+          {teacher.lastSaleAt && (
+            <span className="num text-text-muted-light">
+              آخر بيع: {new Intl.DateTimeFormat("ar-DZ", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+              }).format(new Date(teacher.lastSaleAt))}
+            </span>
+          )}
         </div>
+
+        {/* What this teacher is owed, and the percentage it comes from.
+            Uses its own figure rather than `revenue` above: that one
+            reads payments.course_id only, which misses every pack and
+            basket sale — see lib/data/teacher-earnings.ts. */}
+        {teacher.earnings && (
+          <ShareForm
+            teacherId={teacher.id}
+            percent={teacher.earnings.percent}
+            grossSales={teacher.earnings.grossSales}
+            payout={teacher.earnings.payout}
+            platform={teacher.earnings.platform}
+            sales={teacher.earnings.sales}
+          />
+        )}
 
         <div className="flex items-center gap-2">
           <PromoteToAdminButton userId={teacher.profileId} userName={teacher.fullName} />

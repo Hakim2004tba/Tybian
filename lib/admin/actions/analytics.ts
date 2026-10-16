@@ -2,22 +2,27 @@
 
 import { revalidatePath } from "next/cache";
 import { requireRouteAccess } from "@/lib/auth/session";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { refreshCourseAnalytics, refreshPlatformAnalytics } from "@/lib/analytics/refresh";
 
 /**
- * Manual "تحديث الآن" trigger for an admin who doesn't want to wait for
- * the next scheduled refresh (see app/api/cron/refresh-analytics for
- * the production scheduled path). Uses service_role since
- * refresh_platform_analytics()/refresh_course_analytics() are
- * SECURITY DEFINER and meant to be called from a trusted backend
- * context, not a plain authenticated session.
+ * Manual "تحديث الآن" for an admin who does not want to wait for the
+ * scheduled refresh (app/api/cron/refresh-analytics is the production
+ * path).
+ *
+ * The refresh functions were SECURITY DEFINER plpgsql called through a
+ * service_role client, precisely because they were meant to run in a
+ * trusted context rather than a user session. They are ordinary
+ * TypeScript now with no privilege of their own, so requireRouteAccess
+ * is the entire boundary — it must stay the first statement.
  */
 export async function refreshPlatformAnalyticsAction() {
   await requireRouteAccess("/admin");
-  const admin = createAdminClient();
 
-  const { error } = await admin.rpc("refresh_platform_analytics");
-  if (error) return { error: "تعذّر تحديث التحليلات" };
+  try {
+    await refreshPlatformAnalytics();
+  } catch {
+    return { error: "تعذّر تحديث التحليلات" };
+  }
 
   revalidatePath("/admin/analytics");
   return { error: null };
@@ -25,10 +30,12 @@ export async function refreshPlatformAnalyticsAction() {
 
 export async function refreshCourseAnalyticsAction(courseId: string) {
   await requireRouteAccess("/admin");
-  const admin = createAdminClient();
 
-  const { error } = await admin.rpc("refresh_course_analytics", { p_course_id: courseId });
-  if (error) return { error: "تعذّر تحديث تحليلات الدورة" };
+  try {
+    await refreshCourseAnalytics(courseId);
+  } catch {
+    return { error: "تعذّر تحديث تحليلات الدورة" };
+  }
 
   revalidatePath(`/admin/courses/${courseId}/analytics`);
   return { error: null };

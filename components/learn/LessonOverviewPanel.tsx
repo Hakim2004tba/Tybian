@@ -1,12 +1,9 @@
 import { User, BookOpen, Clock } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { formatLessonLength } from "@/lib/format/duration";
+import { getDictionary } from "@/lib/i18n/locale";
 
-function formatMinutes(seconds: number) {
-  if (!seconds) return "—";
-  return `${Math.round(seconds / 60)} دقيقة`;
-}
-
-export function LessonOverviewPanel({
+export async function LessonOverviewPanel({
   description,
   teacherName,
   courseTitle,
@@ -17,23 +14,25 @@ export function LessonOverviewPanel({
   courseTitle: string;
   durationSeconds: number;
 }) {
+  const { dict } = await getDictionary();
+  const t = dict.learn;
   return (
     <div className="grid gap-6 md:grid-cols-[1.5fr_1fr]">
       <div>
-        <h3 className="mb-2 text-[15px] font-semibold text-text-primary-dark">عن هذا الدرس</h3>
+        <h3 className="mb-2 text-[15px] font-semibold text-text-primary-dark">{t.overview.title}</h3>
         {description ? (
           <p className="whitespace-pre-line text-[14px] leading-relaxed text-text-secondary-dark">
             {description}
           </p>
         ) : (
-          <p className="text-[13.5px] text-text-muted-dark">لا يوجد وصف لهذا الدرس بعد.</p>
+          <p className="text-[13.5px] text-text-muted-dark">{t.overview.empty}</p>
         )}
       </div>
 
       <div className="flex flex-col gap-3">
-        <InfoRow icon={User} label="الأستاذ" value={teacherName ?? "غير محدد"} />
-        <InfoRow icon={BookOpen} label="الدورة" value={courseTitle} />
-        <InfoRow icon={Clock} label="المدة" value={formatMinutes(durationSeconds)} />
+        <InfoRow icon={User} label={t.overview.teacher} value={teacherName ?? t.overview.unset} />
+        <InfoRow icon={BookOpen} label={t.overview.course} value={courseTitle} />
+        <InfoRow icon={Clock} label={t.overview.duration} value={formatLessonLength(durationSeconds) || "—"} />
       </div>
     </div>
   );

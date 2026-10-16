@@ -1,15 +1,29 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { execute, newId, queryOne } from "@/lib/db";
+import { getSessionUser } from "@/lib/auth/session";
+import { notify } from "@/lib/notify";
 
 export type DiscussionActionState = { error: string | null; success?: string | null };
 
 /**
- * RLS's `comments_insert_own` (0009_rls_policies.sql) already restricts
- * this to inserting rows owned by the caller — no extra check needed
- * here beyond requiring a session.
+ * Lesson discussion.
+ *
+ * This file leaned on RLS more heavily than any other in the app. Four
+ * of its actions wrote with nothing but `.eq("id", …)` and a comment
+ * explaining that comments_update_own_or_admin scoped the statement to
+ * the caller's own row "regardless of the id supplied here". With the
+ * policies gone, those statements would have let any signed-in person
+ * edit or delete anybody's comment by passing its id.
+ *
+ * Every write below therefore carries its own ownership test, and the
+ * shape is deliberately uniform: the WHERE clause names the row AND the
+ * owner, so a mismatch updates zero rows instead of the wrong one. Admins
+ * get an explicit OR rather than a separate code path, because two paths
+ * to the same write is how one of them ends up missing a check.
  */
+
 export async function addCommentAction(
   lessonId: string,
   courseSlug: string,
@@ -19,30 +33,31 @@ export async function addCommentAction(
   const body = String(formData.get("body") ?? "").trim();
   if (!body) return { error: "الرجاء كتابة سؤالك أو تعليقك" };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return { error: "الرجاء تسجيل الدخول" };
 
-  const { error } = await supabase.from("comments").insert({
-    lesson_id: lessonId,
-    user_id: user.id,
-    body,
-  });
-
-  if (error) return { error: "تعذّر إرسال التعليق" };
+  try {
+    // user_id comes from the session, never the client, so the row can
+    // only ever be owned by whoever posted it.
+    await execute(`INSERT INTO comments (id, lesson_id, user_id, body) VALUES (?, ?, ?, ?)`, [
+      newId(),
+      lessonId,
+      user.id,
+      body,
+    ]);
+  } catch {
+    return { error: "تعذّر إرسال التعليق" };
+  }
 
   revalidatePath(`/courses/${courseSlug}/learn`);
   return { error: null };
 }
 
 /**
- * Any authenticated user may reply (student-to-student discussion is
- * allowed), but the UI badges a reply as "الأستاذ"/"الإدارة" when the
- * replier is the course's owning teacher or an admin — see
- * DiscussionPanel.tsx. RLS (comment_replies_insert_own) is the actual
- * enforcement for "reply must be your own", same pattern as comments.
+ * Any signed-in user may reply — student-to-student discussion is
+ * allowed. The UI badges a reply as "الأستاذ" or "الإدارة" when the
+ * author is the owning teacher or an admin; that is presentation, and
+ * DiscussionPanel.tsx derives it from the role on the row.
  */
 export async function addReplyAction(
   commentId: string,
@@ -53,19 +68,43 @@ export async function addReplyAction(
   const body = String(formData.get("body") ?? "").trim();
   if (!body) return { error: "الرجاء كتابة الرد" };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return { error: "الرجاء تسجيل الدخول" };
 
-  const { error } = await supabase.from("comment_replies").insert({
-    comment_id: commentId,
-    user_id: user.id,
-    body,
-  });
+  try {
+    await execute(
+      `INSERT INTO comment_replies (id, comment_id, user_id, body) VALUES (?, ?, ?, ?)`,
+      [newId(), commentId, user.id, body]
+    );
+  } catch {
+    return { error: "تعذّر إرسال الرد" };
+  }
 
-  if (error) return { error: "تعذّر إرسال الرد" };
+  /*
+    Tell whoever asked. Without this the reply lands on a page they
+    have already left, and they find it only if they happen to come
+    back — which is why the bell was always empty.
+
+    Not told when they answer themselves, and never allowed to fail the
+    reply that already succeeded (see lib/notify.ts).
+  */
+  const asker = await queryOne<{ user_id: string; lesson_title: string | null }>(
+    `SELECT c.user_id, l.title AS lesson_title
+       FROM comments c
+       LEFT JOIN lessons l ON l.id = c.lesson_id
+      WHERE c.id = ? LIMIT 1`,
+    [commentId]
+  );
+  if (asker && asker.user_id !== user.id) {
+    await notify({
+      userId: asker.user_id,
+      type: "comment_reply",
+      title: "ردّ جديد على سؤالك",
+      body: asker.lesson_title ? `في درس: ${asker.lesson_title}` : null,
+      entityType: "course",
+      entityId: courseSlug,
+    });
+  }
 
   revalidatePath(`/courses/${courseSlug}/learn`);
   return { error: null };
@@ -80,26 +119,25 @@ export async function editCommentAction(
   const body = String(formData.get("body") ?? "").trim();
   if (!body) return { error: "لا يمكن حفظ تعليق فارغ" };
 
-  const supabase = await createClient();
-  // comments_update_own_or_admin RLS scopes this to the caller's own
-  // comment (or admin) regardless of the id supplied here.
-  const { error } = await supabase.from("comments").update({ body }).eq("id", commentId);
-  if (error) return { error: "تعذّر حفظ التعديل" };
-
-  revalidatePath(`/courses/${courseSlug}/learn`);
-  return { error: null };
+  return writeOwned(
+    `UPDATE comments SET body = ? WHERE id = ? AND deleted_at IS NULL`,
+    [body],
+    commentId,
+    courseSlug,
+    "تعذّر حفظ التعديل"
+  );
 }
 
 export async function deleteCommentAction(commentId: string, courseSlug: string) {
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("comments")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", commentId);
-
-  if (error) return { error: "تعذّر حذف التعليق" };
-  revalidatePath(`/courses/${courseSlug}/learn`);
-  return { error: null };
+  // Soft delete, as before: the row stays so replies beneath it keep
+  // their parent, and moderation history is not rewritten.
+  return writeOwned(
+    `UPDATE comments SET deleted_at = UTC_TIMESTAMP(3) WHERE id = ? AND deleted_at IS NULL`,
+    [],
+    commentId,
+    courseSlug,
+    "تعذّر حذف التعليق"
+  );
 }
 
 export async function editReplyAction(
@@ -111,32 +149,82 @@ export async function editReplyAction(
   const body = String(formData.get("body") ?? "").trim();
   if (!body) return { error: "لا يمكن حفظ رد فارغ" };
 
-  const supabase = await createClient();
-  const { error } = await supabase.from("comment_replies").update({ body }).eq("id", replyId);
-  if (error) return { error: "تعذّر حفظ التعديل" };
-
-  revalidatePath(`/courses/${courseSlug}/learn`);
-  return { error: null };
+  return writeOwned(
+    `UPDATE comment_replies SET body = ? WHERE id = ? AND deleted_at IS NULL`,
+    [body],
+    replyId,
+    courseSlug,
+    "تعذّر حفظ التعديل",
+    "comment_replies"
+  );
 }
 
 export async function deleteReplyAction(replyId: string, courseSlug: string) {
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("comment_replies")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", replyId);
+  return writeOwned(
+    `UPDATE comment_replies SET deleted_at = UTC_TIMESTAMP(3) WHERE id = ? AND deleted_at IS NULL`,
+    [],
+    replyId,
+    courseSlug,
+    "تعذّر حذف الرد",
+    "comment_replies"
+  );
+}
 
-  if (error) return { error: "تعذّر حذف الرد" };
+/**
+ * The shared owner-or-admin write.
+ *
+ * `sql` must end with `WHERE id = ?` plus whatever else; the owner test
+ * is appended here so no caller can forget it. The row is read first so
+ * that "not yours" and "does not exist" can be told apart for the error
+ * message, but the UPDATE repeats the condition rather than trusting the
+ * read — between the two statements is exactly where a check that only
+ * ran once would be bypassed.
+ */
+async function writeOwned(
+  sql: string,
+  leadingArgs: (string | number)[],
+  rowId: string,
+  courseSlug: string,
+  failureMessage: string,
+  table: "comments" | "comment_replies" = "comments"
+): Promise<DiscussionActionState> {
+  const user = await getSessionUser();
+  if (!user) return { error: "الرجاء تسجيل الدخول" };
+
+  try {
+    const row = await queryOne<{ user_id: string }>(
+      `SELECT user_id FROM ${table} WHERE id = ? AND deleted_at IS NULL`,
+      [rowId]
+    );
+    if (!row) return { error: failureMessage };
+    if (row.user_id !== user.id && user.role !== "admin") {
+      return { error: "لا تملك صلاحية تعديل هذا المحتوى" };
+    }
+
+    const ownerClause = user.role === "admin" ? "" : " AND user_id = ?";
+    const ownerArgs = user.role === "admin" ? [] : [user.id];
+
+    await execute(sql + ownerClause, [...leadingArgs, rowId, ...ownerArgs]);
+  } catch {
+    return { error: failureMessage };
+  }
+
   revalidatePath(`/courses/${courseSlug}/learn`);
   return { error: null };
 }
 
 /**
- * Any authenticated user may report a comment; content_reports'
- * uq_content_reports_pending_reporter_target (0019) prevents the same
- * user from spamming reports on the same comment while one is still
- * pending — a second attempt here surfaces as a friendly message
- * rather than a raw constraint error.
+ * Reporting a comment.
+ *
+ * uq_content_reports_pending_reporter_target (0019) was a PARTIAL unique
+ * index — one pending report per reporter per target — and MariaDB has
+ * no partial indexes, so the schema carries no equivalent key and there
+ * is no duplicate-key error to catch. The check is done by reading
+ * first.
+ *
+ * Two people reporting at the same instant can still both get a row in.
+ * That was true of the old code's error path too, and a duplicate report
+ * costs a moderator one extra click rather than anything worse.
  */
 export async function reportCommentAction(
   commentId: string,
@@ -147,23 +235,27 @@ export async function reportCommentAction(
   const reason = String(formData.get("reason") ?? "").trim();
   if (!reason) return { error: "الرجاء ذكر سبب الإبلاغ" };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return { error: "الرجاء تسجيل الدخول" };
 
-  const { error } = await supabase.from("content_reports").insert({
-    reporter_id: user.id,
-    target_type: "comment",
-    target_id: commentId,
-    reason,
-  });
+  try {
+    const pending = await queryOne<{ id: string }>(
+      `SELECT id FROM content_reports
+        WHERE reporter_id = ? AND target_type = 'comment' AND target_id = ?
+          AND status = 'pending'`,
+      [user.id, commentId]
+    );
 
-  if (error) {
-    if ((error as { code?: string }).code === "23505") {
+    if (pending) {
       return { error: null, success: "لديك بلاغ قيد المراجعة على هذا التعليق بالفعل" };
     }
+
+    await execute(
+      `INSERT INTO content_reports (id, reporter_id, target_type, target_id, reason)
+       VALUES (?, ?, 'comment', ?, ?)`,
+      [newId(), user.id, commentId, reason]
+    );
+  } catch {
     return { error: "تعذّر إرسال البلاغ" };
   }
 
@@ -171,16 +263,49 @@ export async function reportCommentAction(
 }
 
 /**
- * Wraps the pin_comment() SECURITY DEFINER function (0019) — admin OR
- * the owning teacher may pin. The function itself is the real
- * authorization boundary (re-verified independently by
- * trg_comments_prevent_pin_bypass, 0021); this action is a thin caller.
+ * Pin or unpin a comment.
+ *
+ * Was the pin_comment() SECURITY DEFINER function, backed by
+ * trg_comments_prevent_pin_bypass (0021) which re-verified the caller
+ * independently — two layers, because pinning is how a teacher marks the
+ * authoritative answer in a thread and a student who could pin their own
+ * comment could present a wrong answer as endorsed.
+ *
+ * Both layers were in the database. This is the replacement, and it is
+ * the only one: admin, or the teacher who owns the course this comment's
+ * lesson belongs to. The join walks comment → lesson → section → course
+ * → teacher → profile, and it is `t.profile_id` that identifies the
+ * person, not `c.teacher_id`.
  */
-export async function togglePinCommentAction(commentId: string, courseSlug: string, nextValue: boolean) {
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("pin_comment", { p_comment_id: commentId, p_pinned: nextValue });
+export async function togglePinCommentAction(
+  commentId: string,
+  courseSlug: string,
+  nextValue: boolean
+) {
+  const user = await getSessionUser();
+  if (!user) return { error: "الرجاء تسجيل الدخول" };
 
-  if (error) return { error: "لا تملك صلاحية تثبيت هذا التعليق" };
+  try {
+    if (user.role !== "admin") {
+      const owns = await queryOne<{ ok: number }>(
+        `SELECT 1 AS ok
+           FROM comments cm
+           JOIN lessons l         ON l.id = cm.lesson_id
+           JOIN course_sections s ON s.id = l.section_id
+           JOIN courses c         ON c.id = s.course_id
+           JOIN teachers t        ON t.id = c.teacher_id
+          WHERE cm.id = ? AND t.profile_id = ?
+          LIMIT 1`,
+        [commentId, user.id]
+      );
+      if (!owns) return { error: "لا تملك صلاحية تثبيت هذا التعليق" };
+    }
+
+    await execute(`UPDATE comments SET is_pinned = ? WHERE id = ?`, [nextValue ? 1 : 0, commentId]);
+  } catch {
+    return { error: "لا تملك صلاحية تثبيت هذا التعليق" };
+  }
+
   revalidatePath(`/courses/${courseSlug}/learn`);
   return { error: null };
 }

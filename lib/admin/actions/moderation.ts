@@ -1,33 +1,51 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { execute, transaction } from "@/lib/db";
 import { requireRouteAccess } from "@/lib/auth/session";
 
 export async function resolveReportAction(reportId: string, status: "resolved" | "dismissed") {
   await requireRouteAccess("/admin");
-  const supabase = await createClient();
 
-  const { error } = await supabase.from("content_reports").update({ status }).eq("id", reportId);
-  if (error) return { error: "تعذّر تحديث حالة البلاغ" };
+  /*
+    The report_status ENUM is ('pending','reviewed','dismissed') — there
+    is no 'resolved' member. Writing it non-strictly would store the
+    empty string and the row would drop out of every status filter,
+    including the pending queue, so it would look resolved by accident.
+    'reviewed' is the column's word for the same thing.
+  */
+  const dbStatus = status === "resolved" ? "reviewed" : "dismissed";
+
+  try {
+    await execute(`UPDATE content_reports SET status = ? WHERE id = ?`, [dbStatus, reportId]);
+  } catch {
+    return { error: "تعذّر تحديث حالة البلاغ" };
+  }
 
   revalidatePath("/admin/comments");
   return { error: null };
 }
 
-/** Deletes (soft) the reported comment and marks the report resolved in
- *  one action — the common "this was actually bad content" path. */
+/**
+ * Soft-deletes the reported comment and closes the report together — the
+ * common "this really was bad content" path.
+ *
+ * One transaction, which the Supabase version could not express: it
+ * deleted the comment, then updated the report in a second statement
+ * whose failure it ignored entirely. A crash between the two left the
+ * comment gone and the report still sitting in the queue.
+ */
 export async function deleteReportedCommentAction(reportId: string, commentId: string) {
   await requireRouteAccess("/admin");
-  const supabase = await createClient();
 
-  const { error: deleteError } = await supabase
-    .from("comments")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", commentId);
-  if (deleteError) return { error: "تعذّر حذف التعليق" };
-
-  await supabase.from("content_reports").update({ status: "resolved" }).eq("id", reportId);
+  try {
+    await transaction(async (tx) => {
+      await tx.execute(`UPDATE comments SET deleted_at = UTC_TIMESTAMP(3) WHERE id = ?`, [commentId]);
+      await tx.execute(`UPDATE content_reports SET status = 'reviewed' WHERE id = ?`, [reportId]);
+    });
+  } catch {
+    return { error: "تعذّر حذف التعليق" };
+  }
 
   revalidatePath("/admin/comments");
   return { error: null };

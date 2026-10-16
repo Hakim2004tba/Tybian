@@ -1,108 +1,34 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { execute, newId, queryOne } from "@/lib/db";
+import { recomputeCourseAggregates } from "@/lib/data/course-aggregates";
 import { requireRouteAccess } from "@/lib/auth/session";
-import { videoService } from "@/lib/video";
-import { extractBunnyVideoId } from "@/lib/video/extract-bunny-id";
+import { extractVimeoVideoId } from "@/lib/video/extract-vimeo-id";
 import { extractYoutubeVideoId } from "@/lib/video/extract-youtube-id";
 
 export type ActionState = { error: string | null; success?: string | null };
-
-export type UploadTicket = {
-  dbVideoId: string;
-  uploadEndpoint: string;
-  headers: Record<string, string>;
-};
-
-export type CreateVideoState = ActionState & { ticket?: UploadTicket };
 
 async function assertAdmin() {
   await requireRouteAccess("/admin");
 }
 
 /**
- * Step 1 of "Upload video": registers a new video with Bunny (empty,
- * no bytes yet), stores the DB row, attaches it to the lesson, and
- * returns short-lived TUS upload credentials for the BROWSER to use
- * directly against Bunny — the video bytes never pass through this
- * server or Vercel. See lib/video/VideoService.ts and
- * components/admin/courses/VideoUploadForm.tsx for the client half of
- * this flow.
+ * Attaches a video the admin has already uploaded to Vimeo. There is no
+ * upload flow through this platform at all: the admin uploads on
+ * vimeo.com (their own account, their own bandwidth) and pastes the
+ * link here.
+ *
+ * The only network call is Vimeo's public oEmbed endpoint, which needs
+ * no API key or access token — it confirms the video actually exists
+ * and is embeddable, and returns the real title, thumbnail and (unlike
+ * YouTube's oEmbed) the exact duration, so the admin never has to type
+ * a duration by hand.
+ *
+ * An unlisted Vimeo video is addressed as vimeo.com/<id>/<hash>, and
+ * both halves are stored — the embed will not play without the hash.
  */
-export async function createAndAttachVideoAction(
-  lessonId: string,
-  courseId: string,
-  _prev: CreateVideoState,
-  formData: FormData
-): Promise<CreateVideoState> {
-  await assertAdmin();
-
-  const title = String(formData.get("title") ?? "").trim();
-  if (!title) return { error: "الرجاء إدخال عنوان الفيديو" };
-
-  let providerVideoId: string;
-  try {
-    const created = await videoService.createVideo(title);
-    providerVideoId = created.providerVideoId;
-  } catch (err) {
-    return { error: "تعذّر إنشاء الفيديو على Bunny Stream: " + (err as Error).message };
-  }
-
-  const supabase = await createClient();
-  const { data: video, error } = await supabase
-    .from("videos")
-    .insert({
-      bunny_video_id: providerVideoId,
-      bunny_library_id: process.env.BUNNY_STREAM_LIBRARY_ID!,
-      title,
-      status: "processing",
-    })
-    .select("id")
-    .single();
-
-  if (error || !video) return { error: "تعذّر حفظ سجل الفيديو: " + error?.message };
-
-  const { error: attachError } = await supabase
-    .from("lessons")
-    .update({ video_id: video.id })
-    .eq("id", lessonId);
-
-  if (attachError) {
-    return { error: "تعذّر ربط الفيديو بالدرس: " + attachError.message };
-  }
-
-  const creds = videoService.getUploadCredentials(providerVideoId);
-
-  revalidatePath(`/admin/courses/${courseId}/structure`);
-
-  return {
-    error: null,
-    ticket: {
-      dbVideoId: video.id,
-      uploadEndpoint: creds.uploadEndpoint,
-      headers: creds.headers,
-    },
-  };
-}
-
-/**
- * Step 2, called by the admin after the browser's direct TUS upload to
- * Bunny finishes — polls Bunny for current encode status and syncs it
- * into the DB. Also doubles as "Update video" (title) when a new title
- * is provided.
- */
-/**
- * The alternative to createAndAttachVideoAction's browser-upload flow —
- * for an admin who already uploaded the video directly on Bunny's own
- * dashboard (fast, their own infrastructure) and just wants to tell
- * TIBYAN which video to attach. No TUS upload happens here at all; the
- * only network call is a single GET to confirm the video actually
- * exists in the configured library and to pull its real
- * status/duration/thumbnail, so the local `videos` row is never a bare
- * guess at what Bunny has.
- */
-export async function attachExistingBunnyVideoAction(
+export async function attachVimeoVideoAction(
   lessonId: string,
   courseId: string,
   _prev: ActionState,
@@ -110,70 +36,111 @@ export async function attachExistingBunnyVideoAction(
 ): Promise<ActionState> {
   await requireRouteAccess("/admin");
 
-  const raw = String(formData.get("bunnyVideoIdOrUrl") ?? "").trim();
-  const title = String(formData.get("title") ?? "").trim();
+  const raw = String(formData.get("vimeoUrlOrId") ?? "").trim();
+  const titleOverride = String(formData.get("title") ?? "").trim();
 
-  if (!raw) return { error: "الرجاء لصق معرّف الفيديو أو رابطه من Bunny" };
+  if (!raw) return { error: "الرجاء لصق رابط الفيديو من Vimeo" };
 
-  const videoId = extractBunnyVideoId(raw);
-  if (!videoId) {
-    return { error: "تعذّر التعرّف على معرّف الفيديو من النص المُدخل — تأكد أنه معرّف (GUID) أو رابط صحيح من Bunny" };
+  const ref = extractVimeoVideoId(raw);
+  if (!ref) {
+    return { error: "تعذّر التعرّف على معرّف الفيديو — تأكد أنه رابط Vimeo صحيح مثل vimeo.com/123456789" };
   }
 
-  const supabase = await createClient();
 
-  const { data: existing } = await supabase
-    .from("videos")
-    .select("id")
-    .eq("bunny_video_id", videoId)
-    .maybeSingle();
-  if (existing) return { error: "هذا الفيديو مرتبط بالفعل بدرس آخر في المنصة" };
+  // Like YouTube (see 0032), a Vimeo video is an external reference
+  // rather than an owned asset, so the same video may legitimately back
+  // more than one lesson. No uniqueness check.
 
-  let details;
+  const canonical = ref.hash
+    ? `https://vimeo.com/${ref.videoId}/${ref.hash}`
+    : `https://vimeo.com/${ref.videoId}`;
+
+  const siteOrigin = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "");
+
+  let oembedTitle: string | null = null;
+  let thumbnailUrl: string | null = null;
+  let durationSeconds = 0;
+  let oembedFailure: string | null = null;
+
   try {
-    details = await videoService.getVideoDetails(videoId);
+    // THE REFERER IS REQUIRED, not decorative. Videos restricted to
+    // this platform's domain (the recommended privacy setting) answer an
+    // anonymous oEmbed request with a truncated payload —
+    // `domain_status_code: 403`, no title, no thumbnail and no
+    // duration — which is why every attached lesson was saved with 0
+    // minutes and every course advertised "0 hours". Presenting the
+    // site's own origin gets the real metadata back.
+    const res = await fetch(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(canonical)}`, {
+      headers: siteOrigin ? { Referer: siteOrigin } : {},
+    });
+    if (res.ok) {
+      const data = await res.json();
+
+      // Vimeo answers 200 with a STRIPPED payload when the video is
+      // domain-restricted and the caller is not on its allow-list: no
+      // title, no thumbnail, no duration, just `domain_status_code:
+      // 403`. That reads like a working call with no metadata, which is
+      // exactly how every lesson ended up stored with 0 minutes.
+      if (data?.domain_status_code === 403) {
+        oembedFailure = `إعدادات خصوصية Vimeo تمنع هذا النطاق. أضف ${siteOrigin ?? "نطاق المنصة"} إلى النطاقات المسموح بها في إعدادات الفيديو على Vimeo.`;
+      } else {
+        oembedTitle = typeof data.title === "string" ? data.title : null;
+        thumbnailUrl = typeof data.thumbnail_url === "string" ? data.thumbnail_url : null;
+        durationSeconds = typeof data.duration === "number" ? Math.round(data.duration) : 0;
+      }
+    } else if (res.status === 403) {
+      // Vimeo answers 403 for a private video, and for an unlisted one
+      // whose hash is missing or wrong — by far the most common paste
+      // mistake, so name it instead of reporting a generic failure.
+      oembedFailure =
+        "رفضت Vimeo عرض هذا الفيديو — إن كان غير مُدرج (unlisted) فانسخ الرابط الكامل بالرمز الخاص (vimeo.com/123456789/abcdef1234)، وإن كان خاصاً (private) فغيّر خصوصيته إلى unlisted.";
+    } else if (res.status === 404) {
+      oembedFailure = "لم تعثر Vimeo على هذا الفيديو — تأكد من صحة الرابط.";
+    } else {
+      oembedFailure = `ردّت Vimeo برمز ${res.status}.`;
+    }
   } catch {
-    return {
-      error:
-        "تعذّر العثور على هذا الفيديو في مكتبة Bunny المضبوطة — تأكد أن المعرّف صحيح، وأن الفيديو مرفوع في نفس المكتبة (Library ID) المُعرَّفة في إعدادات المنصة.",
-    };
+    // Network failure reaching Vimeo is not fatal on its own — fall
+    // through to the manual-title path below rather than blocking the
+    // attach over a momentary outage.
   }
 
-  const { data: video, error: insertError } = await supabase
-    .from("videos")
-    .insert({
-      bunny_video_id: videoId,
-      bunny_library_id: process.env.BUNNY_STREAM_LIBRARY_ID!,
-      title: title || "فيديو من Bunny",
-      status: details.status,
-      duration_seconds: details.durationSeconds,
-      thumbnail_url: details.thumbnailUrl,
-      metadata: details.raw,
-    })
-    .select("id")
-    .single();
+  if (oembedFailure) return { error: oembedFailure };
 
-  if (insertError || !video) return { error: "تعذّر حفظ سجل الفيديو: " + insertError?.message };
+  if (!oembedTitle && !titleOverride) {
+    return { error: "تعذّر التحقق من الفيديو على Vimeo — تأكد من الرابط، أو أدخل عنواناً يدوياً" };
+  }
 
-  const { error: attachError } = await supabase.from("lessons").update({ video_id: video.id }).eq("id", lessonId);
-  if (attachError) return { error: "تعذّر ربط الفيديو بالدرس" };
+  const dbVideoId = newId();
+
+  try {
+    // youtube_video_id stays NULL, which videos_source_check requires
+    // for a vimeo row — and MariaDB actually enforces that check.
+    await execute(
+      `INSERT INTO videos
+         (id, source, vimeo_video_id, vimeo_hash, title, status, duration_seconds, thumbnail_url)
+       VALUES (?, 'vimeo', ?, ?, ?, 'ready', ?, ?)`,
+      [
+        dbVideoId,
+        ref.videoId,
+        ref.hash,
+        titleOverride || oembedTitle || "فيديو من Vimeo",
+        durationSeconds,
+        thumbnailUrl,
+      ]
+    );
+    await execute(`UPDATE lessons SET video_id = ? WHERE id = ?`, [dbVideoId, lessonId]);
+    // videos_count and duration_minutes both change; the trigger that
+    // used to maintain them does not exist on MariaDB.
+    await recomputeCourseAggregates(courseId);
+  } catch (error) {
+    return { error: "تعذّر حفظ سجل الفيديو: " + (error as Error).message };
+  }
 
   revalidatePath(`/admin/courses/${courseId}/structure`);
-  return { error: null, success: "تم ربط الفيديو بنجاح" };
+  return { error: null, success: "تم ربط فيديو Vimeo بنجاح" };
 }
 
-/**
- * The YouTube counterpart to attachExistingBunnyVideoAction — for
- * content already public on YouTube, avoiding a redundant re-upload.
- * Uses YouTube's public oEmbed endpoint (no API key required, unlike
- * the full YouTube Data API) to fetch the real title/thumbnail and
- * confirm the video actually exists and is embeddable — never trusts
- * the pasted URL/ID blindly. Duration isn't available from oEmbed, so
- * the admin enters it manually (optional); this is an honest
- * limitation, not a fetch that was skipped by oversight — getting
- * exact duration would require the full YouTube Data API v3 and a
- * separate API key credential this project doesn't otherwise need.
- */
 export async function attachYoutubeVideoAction(
   lessonId: string,
   courseId: string,
@@ -193,14 +160,11 @@ export async function attachYoutubeVideoAction(
     return { error: "تعذّر التعرّف على معرّف الفيديو من النص المُدخل — تأكد أنه رابط يوتيوب صحيح" };
   }
 
-  const supabase = await createClient();
 
-  // Unlike Bunny (where the equivalent check above stays — each Bunny
-  // upload IS a dedicated asset for one specific lesson recording), a
-  // YouTube video is just an external reference, not an owned asset —
-  // the same video legitimately applies to more than one lesson (a
-  // shared intro clip, the same public lecture referenced from two
-  // related lessons, etc.), so no uniqueness check here. See 0032.
+  // A YouTube video is an external reference, not an owned asset — the
+  // same video legitimately applies to more than one lesson (a shared
+  // intro clip, the same public lecture referenced from two related
+  // lessons, etc.), so no uniqueness check here. See 0032.
 
   let oembedTitle: string | null = null;
   let thumbnailUrl: string | null = null;
@@ -226,28 +190,42 @@ export async function attachYoutubeVideoAction(
     };
   }
 
-  const { data: video, error: insertError } = await supabase
-    .from("videos")
-    .insert({
-      source: "youtube",
-      youtube_video_id: videoId,
-      title: titleOverride || oembedTitle || "فيديو من يوتيوب",
-      status: "ready", // already published/processed on YouTube itself
-      duration_seconds: Number.isFinite(durationMinutes) && durationMinutes > 0 ? Math.round(durationMinutes * 60) : 0,
-      thumbnail_url: thumbnailUrl,
-    })
-    .select("id")
-    .single();
+  const dbVideoId = newId();
 
-  if (insertError || !video) return { error: "تعذّر حفظ سجل الفيديو: " + insertError?.message };
-
-  const { error: attachError } = await supabase.from("lessons").update({ video_id: video.id }).eq("id", lessonId);
-  if (attachError) return { error: "تعذّر ربط الفيديو بالدرس" };
+  try {
+    await execute(
+      `INSERT INTO videos
+         (id, source, youtube_video_id, title, status, duration_seconds, thumbnail_url)
+       VALUES (?, 'youtube', ?, ?, 'ready', ?, ?)`,
+      [
+        dbVideoId,
+        videoId,
+        titleOverride || oembedTitle || "فيديو من يوتيوب",
+        Number.isFinite(durationMinutes) && durationMinutes > 0
+          ? Math.round(durationMinutes * 60)
+          : 0,
+        thumbnailUrl,
+      ]
+    );
+    await execute(`UPDATE lessons SET video_id = ? WHERE id = ?`, [dbVideoId, lessonId]);
+    await recomputeCourseAggregates(courseId);
+  } catch (error) {
+    return { error: "تعذّر حفظ سجل الفيديو: " + (error as Error).message };
+  }
 
   revalidatePath(`/admin/courses/${courseId}/structure`);
   return { error: null, success: "تم ربط فيديو يوتيوب بنجاح" };
 }
 
+/**
+ * Renames the platform's own record of a video.
+ *
+ * Both remaining providers host videos the platform references rather
+ * than owns, so there is nothing remote to push a rename to and no
+ * transcode status to poll — what Bunny needed this action for is gone.
+ * Title/duration/thumbnail were captured from the provider's oEmbed at
+ * attach time; this only edits the local title.
+ */
 export async function refreshOrUpdateVideoAction(
   videoId: string,
   courseId: string,
@@ -257,100 +235,60 @@ export async function refreshOrUpdateVideoAction(
   await assertAdmin();
 
   const newTitle = String(formData.get("title") ?? "").trim();
-  const supabase = await createClient();
+  if (!newTitle) return { error: null };
 
-  const { data: video } = await supabase
-    .from("videos")
-    .select("source, bunny_video_id")
-    .eq("id", videoId)
-    .maybeSingle();
 
+  const video = await queryOne<{ id: string }>(`SELECT id FROM videos WHERE id = ?`, [videoId]);
   if (!video) return { error: "الفيديو غير موجود" };
 
-  // YouTube videos have no Bunny counterpart to call — a title change
-  // here only updates our own record; YouTube's own title (and
-  // status/duration, which we already have from oEmbed at attach time)
-  // isn't ours to change and doesn't need "refreshing" the way a
-  // Bunny transcode's status does.
-  if (video.source === "youtube") {
-    if (!newTitle) return { error: null };
-    const { error } = await supabase.from("videos").update({ title: newTitle }).eq("id", videoId);
-    if (error) return { error: "تعذّر حفظ العنوان" };
-    revalidatePath(`/admin/courses/${courseId}/structure`);
-    return { error: null, success: "تم تحديث العنوان" };
-  }
-
   try {
-    if (newTitle) {
-      await videoService.updateVideoTitle(video.bunny_video_id!, newTitle);
-    }
-    const details = await videoService.getVideoDetails(video.bunny_video_id!);
-
-    const { error } = await supabase
-      .from("videos")
-      .update({
-        title: newTitle || undefined,
-        status: details.status,
-        duration_seconds: details.durationSeconds,
-        thumbnail_url: details.thumbnailUrl,
-        metadata: details.raw,
-      })
-      .eq("id", videoId);
-
-    if (error) return { error: "تعذّر حفظ حالة الفيديو: " + error.message };
-  } catch (err) {
-    return { error: "تعذّر التواصل مع Bunny Stream: " + (err as Error).message };
+    await execute(`UPDATE videos SET title = ? WHERE id = ?`, [newTitle, videoId]);
+  } catch {
+    return { error: "تعذّر حفظ العنوان" };
   }
 
   revalidatePath(`/admin/courses/${courseId}/structure`);
-  return { error: null, success: "تم تحديث بيانات الفيديو" };
+  return { error: null, success: "تم تحديث العنوان" };
 }
 
 export async function detachVideoAction(lessonId: string, courseId: string) {
   await assertAdmin();
-  const supabase = await createClient();
 
-  const { error } = await supabase.from("lessons").update({ video_id: null }).eq("id", lessonId);
-  if (error) return { error: "تعذّر فصل الفيديو عن الدرس: " + error.message };
+  try {
+    await execute(`UPDATE lessons SET video_id = NULL WHERE id = ?`, [lessonId]);
+    await recomputeCourseAggregates(courseId);
+  } catch (error) {
+    return { error: "تعذّر فصل الفيديو عن الدرس: " + (error as Error).message };
+  }
 
   revalidatePath(`/admin/courses/${courseId}/structure`);
   return { error: null };
 }
 
 /**
- * Detaches from the lesson, deletes on Bunny, then removes the DB row.
- * Order matters: if the Bunny delete call fails, we still want the DB
- * row (and the lesson attachment) intact rather than silently orphaning
- * a video Bunny still has, so detach happens first but the DB row
- * deletion only happens after Bunny confirms.
+ * Removes the platform's record of a video and detaches it from its
+ * lesson.
+ *
+ * This never deletes anything on YouTube or Vimeo: those videos live in
+ * the uploader's own account and are only referenced here. Removing the
+ * reference is the whole operation — which also means an admin who
+ * wants the video actually gone must delete it in the provider's own
+ * dashboard as well.
  */
 export async function deleteVideoAction(videoId: string, lessonId: string, courseId: string) {
   await assertAdmin();
-  const supabase = await createClient();
 
-  const { data: video } = await supabase
-    .from("videos")
-    .select("source, bunny_video_id")
-    .eq("id", videoId)
-    .maybeSingle();
-
+  const video = await queryOne<{ id: string }>(`SELECT id FROM videos WHERE id = ?`, [videoId]);
   if (!video) return { error: "الفيديو غير موجود" };
 
-  await supabase.from("lessons").update({ video_id: null }).eq("id", lessonId);
+  await execute(`UPDATE lessons SET video_id = NULL WHERE id = ?`, [lessonId]);
 
-  // YouTube videos aren't hosted on Bunny at all — deleting our
-  // reference to them never touches YouTube itself (we don't own that
-  // video, we just linked to it), so there's no remote delete call to make.
-  if (video.source === "bunny") {
-    try {
-      await videoService.deleteVideo(video.bunny_video_id!);
-    } catch (err) {
-      return { error: "تعذّر حذف الفيديو من Bunny Stream: " + (err as Error).message };
-    }
+  try {
+    await execute(`DELETE FROM videos WHERE id = ?`, [videoId]);
+    await recomputeCourseAggregates(courseId);
+  } catch (error) {
+    return { error: "تعذّر حذف الفيديو: " + (error as Error).message };
   }
-
-  const { error } = await supabase.from("videos").delete().eq("id", videoId);
-  if (error) return { error: "تم الحذف من Bunny لكن تعذّر حذف السجل محلياً: " + error.message };
 
   revalidatePath(`/admin/courses/${courseId}/structure`);
   return { error: null };

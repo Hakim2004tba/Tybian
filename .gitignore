@@ -1,1 +1,30 @@
 node_modules/
+
+# Build output. 198 files of it were tracked, so every build showed up
+# as hundreds of changed files and buried the real diff.
+.next/
+out/
+
+# The upload bundle assembled by scripts/build-deploy.sh.
+deploy/
+
+# SECRETS — never in the repository.
+#
+# .env.local was tracked and pushed to a PUBLIC repo on 2026-09-04,
+# exposing the Bunny Stream and Supabase keys for six weeks. The keys
+# must be rotated; this line only stops it happening again.
+# .env.local.example stays tracked: it carries the NAMES with empty
+# values, which is what a new developer actually needs.
+.env
+.env.local
+.env.*.local
+!.env.local.example
+
+.DS_Store
+*.log
+tsconfig.tsbuildinfo
+next-env.d.ts
+
+# The deploy zip — a build artefact, 20MB, rebuilt on every release.
+tibyan-deploy.zip
+*.zip

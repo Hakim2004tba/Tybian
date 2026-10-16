@@ -30,7 +30,7 @@ check("no protocol/www variant", extractYoutubeVideoId(`youtube.com/watch?v=${ID
 
 check("empty string returns null", extractYoutubeVideoId(""), null);
 check("unrelated text returns null", extractYoutubeVideoId("hello world"), null);
-check("a Bunny GUID (wrong format entirely) returns null", extractYoutubeVideoId("a1b2c3d4-e5f6-4789-a012-b3c4d5e6f789"), null);
+check("a UUID (wrong format entirely) returns null", extractYoutubeVideoId("a1b2c3d4-e5f6-4789-a012-b3c4d5e6f789"), null);
 check("a random non-YouTube URL returns null", extractYoutubeVideoId("https://example.com/video/123"), null);
 check("truncated ID (10 chars) returns null", extractYoutubeVideoId("dQw4w9WgXc"), null);
 

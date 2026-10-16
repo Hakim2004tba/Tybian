@@ -8,12 +8,17 @@
 
 export type SortOption = "popular" | "rating" | "newest" | "price_asc" | "price_desc";
 
-export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: "popular", label: "الأكثر شهرة" },
-  { value: "rating", label: "الأعلى تقييماً" },
-  { value: "newest", label: "الأحدث" },
-  { value: "price_asc", label: "السعر: من الأقل" },
-  { value: "price_desc", label: "السعر: من الأعلى" },
+export type SortKey = "popular" | "rating" | "newest" | "priceAsc" | "priceDesc";
+
+export const SORT_OPTIONS: { value: SortOption; key: SortKey }[] = [
+  /* `key` indexes dict.pages.sort — the wording follows the reader
+     while `value`, which goes into the URL, never changes, so a shared
+     link keeps working whatever language opened it. */
+  { value: "popular", key: "popular" },
+  { value: "rating", key: "rating" },
+  { value: "newest", key: "newest" },
+  { value: "price_asc", key: "priceAsc" },
+  { value: "price_desc", key: "priceDesc" },
 ];
 
 export type DurationBucket = "short" | "medium" | "long";

@@ -16,6 +16,8 @@ export type StudySessionRow = {
 export type LeaderboardEntry = {
   userId: string;
   weeklySeconds: number;
+  /** The garden's period — see lib/study/garden.ts. */
+  monthlySeconds: number;
   streakDays: number;
 };
 
@@ -54,7 +56,8 @@ export function computeStreakDays(distinctDates: string[], today: string): numbe
 export function aggregateLeaderboard(
   sessions: StudySessionRow[],
   weekStartDate: string,
-  today: string
+  today: string,
+  monthStartDate: string = weekStartDate
 ): LeaderboardEntry[] {
   const byUser = new Map<string, StudySessionRow[]>();
   for (const s of sessions) {
@@ -72,8 +75,17 @@ export function aggregateLeaderboard(
     const distinctDates = [...new Set(rows.map((r) => r.date))];
     const streakDays = computeStreakDays(distinctDates, today);
 
-    entries.push({ userId, weeklySeconds, streakDays });
+    /*
+      The month is what the garden is measured over (see lib/study/
+      garden.ts for why monthly and not weekly). The window handed in is
+      wider than either period, so both totals come from one pass.
+    */
+    const monthlySeconds = rows
+      .filter((r) => r.date >= monthStartDate && r.date <= today)
+      .reduce((sum, r) => sum + r.durationSeconds, 0);
+
+    entries.push({ userId, weeklySeconds, monthlySeconds, streakDays });
   }
 
-  return entries.sort((a, b) => b.weeklySeconds - a.weeklySeconds);
+  return entries.sort((a, b) => b.monthlySeconds - a.monthlySeconds);
 }

@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import type { CourseSearchParams } from "@/lib/search/params";
+import { getDictionary } from "@/lib/i18n/locale";
 
 /**
  * A plain <form method="GET" action="/courses">. Submitting it navigates
@@ -9,7 +10,7 @@ import type { CourseSearchParams } from "@/lib/search/params";
  * input so changing a filter doesn't silently reset it (page
  * intentionally resets to 1 on any new filter, by simply omitting it).
  */
-export function FilterPanel({
+export async function FilterPanel({
   params,
   academicYears,
   subjects,
@@ -18,6 +19,8 @@ export function FilterPanel({
   academicYears: { id: string; name_ar: string }[];
   subjects: string[];
 }) {
+  const { dict } = await getDictionary();
+  const t = dict.search;
   return (
     <form
       method="GET"
@@ -32,18 +35,18 @@ export function FilterPanel({
           type="text"
           name="q"
           defaultValue={params.q ?? ""}
-          placeholder="ابحث عن دورة، أستاذ، أو سنة دراسية..."
+          placeholder={t.placeholder}
           className="w-full bg-transparent text-[14px] outline-none placeholder:text-text-muted-light"
         />
       </div>
 
-      <Field label="السنة الدراسية">
+      <Field label={t.academicYear}>
         <select
           name="year"
           defaultValue={params.yearId ?? ""}
           className="rounded-sm border border-border-light bg-surface-light px-3 py-2 text-[13.5px] outline-none focus:border-primary"
         >
-          <option value="">كل السنوات</option>
+          <option value="">{t.allYears}</option>
           {academicYears.map((y) => (
             <option key={y.id} value={y.id}>
               {y.name_ar}
@@ -52,13 +55,13 @@ export function FilterPanel({
         </select>
       </Field>
 
-      <Field label="المادة">
+      <Field label={t.subject}>
         <select
           name="subject"
           defaultValue={params.subject ?? ""}
           className="rounded-sm border border-border-light bg-surface-light px-3 py-2 text-[13.5px] outline-none focus:border-primary"
         >
-          <option value="">كل المواد</option>
+          <option value="">{t.allSubjects}</option>
           {subjects.map((s) => (
             <option key={s} value={s}>
               {s}
@@ -67,40 +70,40 @@ export function FilterPanel({
         </select>
       </Field>
 
-      <Field label="التقييم">
+      <Field label={t.rating}>
         <select
           name="rating"
           defaultValue={params.ratingMin ?? ""}
           className="rounded-sm border border-border-light bg-surface-light px-3 py-2 text-[13.5px] outline-none focus:border-primary"
         >
-          <option value="">أي تقييم</option>
-          <option value="4">4 نجوم فأكثر</option>
-          <option value="3">3 نجوم فأكثر</option>
-          <option value="2">نجمتان فأكثر</option>
+          <option value="">{t.anyRating}</option>
+          <option value="4">{t.stars4}</option>
+          <option value="3">{t.stars3}</option>
+          <option value="2">{t.stars2}</option>
         </select>
       </Field>
 
-      <Field label="المدة">
+      <Field label={t.duration}>
         <select
           name="duration"
           defaultValue={params.duration ?? ""}
           className="rounded-sm border border-border-light bg-surface-light px-3 py-2 text-[13.5px] outline-none focus:border-primary"
         >
-          <option value="">أي مدة</option>
-          <option value="short">أقل من ساعتين</option>
-          <option value="medium">من 2 إلى 10 ساعات</option>
-          <option value="long">أكثر من 10 ساعات</option>
+          <option value="">{t.anyDuration}</option>
+          <option value="short">{t.under2h}</option>
+          <option value="medium">{t.from2to10h}</option>
+          <option value="long">{t.over10h}</option>
         </select>
       </Field>
 
-      <Field label="السعر (دج)">
+      <Field label={t.price}>
         <div className="flex items-center gap-2">
           <input
             type="number"
             name="price_min"
             min={0}
             defaultValue={params.priceMin ?? ""}
-            placeholder="من"
+            placeholder={t.from}
             className="w-full rounded-sm border border-border-light bg-surface-light px-3 py-2 text-[13.5px] outline-none focus:border-primary"
           />
           <span className="text-text-muted-light">—</span>
@@ -109,17 +112,17 @@ export function FilterPanel({
             name="price_max"
             min={0}
             defaultValue={params.priceMax ?? ""}
-            placeholder="إلى"
+            placeholder={t.to}
             className="w-full rounded-sm border border-border-light bg-surface-light px-3 py-2 text-[13.5px] outline-none focus:border-primary"
           />
         </div>
       </Field>
 
       <Button type="submit" className="w-full justify-center">
-        تطبيق الفلاتر
+        {t.apply}
       </Button>
       <a href="/courses" className="text-center text-[12.5px] text-text-muted-light hover:text-primary">
-        إعادة تعيين الكل
+        {t.resetAll}
       </a>
     </form>
   );

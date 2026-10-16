@@ -2,38 +2,40 @@
 
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { execute, newId, queryOne, transaction } from "@/lib/db";
 import { requireRouteAccess } from "@/lib/auth/session";
+import { hashPassword } from "@/lib/auth/password";
 
 export type ActionState = { error: string | null; success?: string | null };
 
 function generateTempPassword(): string {
-  // 12 random bytes -> readable base64url string, well above typical
-  // minimum password strength requirements.
+  // 9 random bytes as base64url — 72 bits, well above any plausible
+  // guessing attack on a password that exists to be changed on first
+  // login.
   return randomBytes(9).toString("base64url");
 }
 
-export type CreateTeacherState = ActionState & { credentials?: { email: string; tempPassword: string } };
+export type CreateTeacherState = ActionState & {
+  credentials?: { email: string; tempPassword: string };
+};
 
 /**
- * Creating a teacher is NOT just an insert into `teachers` — a teacher
- * needs a real login account. This creates the auth.users row via the
- * Supabase Admin API (which fires handle_new_auth_user, 0007, creating
- * the profiles row with role='student' by default), promotes that
- * profile to role='teacher' via service_role (the only path allowed
- * through prevent_role_self_escalation, 0009/0020), then creates the
- * teachers row itself.
+ * Creates a teacher: a login account, a profile, and the teachers row.
  *
- * No email-sending is configured in this project yet, so the generated
- * temporary password is returned once, inline in the action's result
- * (never in the URL — a query param would leak into browser history and
- * server logs) for the admin to share with the teacher directly. The
- * teacher should change it via "نسيت كلمة المرور" on first login.
+ * The Supabase version orchestrated three services — the Admin API to
+ * create an auth.users row, handle_new_auth_user() to make the profile,
+ * and service_role to promote the role past prevent_role_self_escalation
+ * — and unwound by deleting the auth user if any later step failed,
+ * because the three could not share a transaction.
  *
- * If any later step fails after the auth user is created, the auth
- * user is deleted again so a failed attempt never leaves an orphaned,
- * half-created account.
+ * All three tables are ours now, so this is one transaction. A failure
+ * anywhere rolls the whole thing back, and there is no window in which a
+ * half-created account exists to be cleaned up.
+ *
+ * The temporary password is returned once, in the action result, for the
+ * admin to pass on — never in a URL, where it would land in browser
+ * history and server logs. The teacher should change it via
+ * "نسيت كلمة المرور" on first login.
  */
 export async function createTeacherAction(
   _prev: CreateTeacherState,
@@ -42,7 +44,7 @@ export async function createTeacherAction(
   await requireRouteAccess("/admin");
 
   const fullName = String(formData.get("fullName") ?? "").trim();
-  const email = String(formData.get("email") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const title = String(formData.get("title") ?? "").trim() || null;
   const specialty = String(formData.get("specialty") ?? "").trim() || null;
   const institution = String(formData.get("institution") ?? "").trim() || null;
@@ -52,38 +54,40 @@ export async function createTeacherAction(
   if (!fullName) return { error: "الرجاء إدخال الاسم الكامل" };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "البريد الإلكتروني غير صالح" };
 
-  const admin = createAdminClient();
+  const existing = await queryOne<{ id: string }>(`SELECT id FROM users WHERE email = ?`, [email]);
+  if (existing) return { error: "هذا البريد الإلكتروني مسجّل بالفعل" };
+
   const tempPassword = generateTempPassword();
+  const passwordHash = await hashPassword(tempPassword);
+  const userId = newId();
 
-  const { data: created, error: createError } = await admin.auth.admin.createUser({
-    email,
-    password: tempPassword,
-    email_confirm: true,
-    user_metadata: { full_name: fullName },
-  });
+  try {
+    await transaction(async (tx) => {
+      /*
+        email_verified_at is set at creation.
 
-  if (createError || !created.user) {
-    return { error: "تعذّر إنشاء الحساب: " + (createError?.message ?? "خطأ غير معروف") };
-  }
-
-  const userId = created.user.id;
-
-  const { error: roleError } = await admin
-    .from("profiles")
-    .update({ role: "teacher", avatar_url: avatarUrl })
-    .eq("id", userId);
-  if (roleError) {
-    await admin.auth.admin.deleteUser(userId);
-    return { error: "تعذّر ترقية الحساب إلى أستاذ" };
-  }
-
-  const { error: teacherError } = await admin
-    .from("teachers")
-    .insert({ profile_id: userId, title, specialty, institution, bio });
-
-  if (teacherError) {
-    await admin.auth.admin.deleteUser(userId);
-    return { error: "تعذّر إنشاء سجل الأستاذ: " + teacherError.message };
+        An admin creating the account IS the verification — the teacher
+        never receives a confirmation mail, so leaving it null would mark
+        a legitimate account permanently unverified. The Supabase version
+        passed email_confirm: true for the same reason.
+      */
+      await tx.execute(
+        `INSERT INTO users (id, email, password_hash, email_verified_at)
+         VALUES (?, ?, ?, UTC_TIMESTAMP(3))`,
+        [userId, email, passwordHash]
+      );
+      await tx.execute(
+        `INSERT INTO profiles (id, full_name, role, avatar_url) VALUES (?, ?, 'teacher', ?)`,
+        [userId, fullName, avatarUrl]
+      );
+      await tx.execute(
+        `INSERT INTO teachers (id, profile_id, title, specialty, institution, bio)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [newId(), userId, title, specialty, institution, bio]
+      );
+    });
+  } catch (error) {
+    return { error: "تعذّر إنشاء حساب الأستاذ: " + (error as Error).message };
   }
 
   revalidatePath("/admin/teachers");
@@ -111,52 +115,58 @@ export async function updateTeacherAction(
 
   if (!fullName) return { error: "الرجاء إدخال الاسم الكامل" };
 
-  const supabase = await createClient();
-
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .update({ full_name: fullName, avatar_url: avatarUrl })
-    .eq("id", profileId);
-  if (profileError) return { error: "تعذّر حفظ الاسم" };
-
-  const { error: teacherError } = await supabase
-    .from("teachers")
-    .update({ title, specialty, institution, bio })
-    .eq("id", teacherId);
-  if (teacherError) return { error: "تعذّر حفظ بيانات الأستاذ" };
+  try {
+    // Both rows together: the old code wrote the profile, then the
+    // teacher, and a failure between them saved the new name against the
+    // old professional details.
+    await transaction(async (tx) => {
+      await tx.execute(`UPDATE profiles SET full_name = ?, avatar_url = ? WHERE id = ?`, [
+        fullName,
+        avatarUrl,
+        profileId,
+      ]);
+      await tx.execute(
+        `UPDATE teachers SET title = ?, specialty = ?, institution = ?, bio = ? WHERE id = ?`,
+        [title, specialty, institution, bio, teacherId]
+      );
+    });
+  } catch {
+    return { error: "تعذّر حفظ بيانات الأستاذ" };
+  }
 
   revalidatePath("/admin/teachers");
   return { error: null, success: "تم الحفظ" };
 }
 
 /**
- * Soft-deletes the teachers row only — blocked if the teacher still has
- * any non-deleted courses (courses.teacher_id has ON DELETE RESTRICT at
- * the DB level for a HARD delete, but a soft delete wouldn't trip that
- * constraint at all, silently leaving courses pointing at a "deleted"
- * teacher — so this check is enforced here, at the application layer,
- * not left to the database to catch).
+ * Soft-deletes the teachers row, refusing while the teacher still owns
+ * active courses.
+ *
+ * The check lives here because a soft delete cannot trip the ON DELETE
+ * RESTRICT on courses.teacher_id — that only guards a hard delete. Left
+ * to the database, a "deleted" teacher would keep appearing on their own
+ * published course pages.
  */
 export async function deleteTeacherAction(teacherId: string) {
   await requireRouteAccess("/admin");
-  const supabase = await createClient();
 
-  const { count } = await supabase
-    .from("courses")
-    .select("id", { count: "exact", head: true })
-    .eq("teacher_id", teacherId)
-    .is("deleted_at", null);
+  try {
+    const row = await queryOne<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM courses WHERE teacher_id = ? AND deleted_at IS NULL`,
+      [teacherId]
+    );
+    const count = Number(row?.n ?? 0);
 
-  if (count && count > 0) {
-    return { error: `لا يمكن حذف هذا الأستاذ — لديه ${count} دورة نشطة. أعد إسناد الدورات أو احذفها أولاً.` };
+    if (count > 0) {
+      return {
+        error: `لا يمكن حذف هذا الأستاذ — لديه ${count} دورة نشطة. أعد إسناد الدورات أو احذفها أولاً.`,
+      };
+    }
+
+    await execute(`UPDATE teachers SET deleted_at = UTC_TIMESTAMP(3) WHERE id = ?`, [teacherId]);
+  } catch {
+    return { error: "تعذّر حذف الأستاذ" };
   }
-
-  const { error } = await supabase
-    .from("teachers")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", teacherId);
-
-  if (error) return { error: "تعذّر حذف الأستاذ" };
 
   revalidatePath("/admin/teachers");
   return { error: null };

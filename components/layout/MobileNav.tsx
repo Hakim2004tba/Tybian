@@ -5,9 +5,11 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { SignOutButton } from "@/components/auth/SignOutButton";
 import { Logo } from "@/components/layout/Logo";
 import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { cn } from "@/lib/utils";
+import { useDrawerPresence } from "@/lib/ui/drawer-presence";
 import type { Dictionary, Locale } from "@/lib/i18n/dictionaries";
 
 export function MobileNav({
@@ -34,7 +36,15 @@ export function MobileNav({
   // `document` doesn't exist during SSR — only portal once mounted client-side.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
+
+  /*
+    A closed drawer is not rendered at all. It used to sit parked
+    308px past the right edge, which phones counted as page width —
+    see the hook for why that shifted every page sideways.
+  */
+  const { present, shown } = useDrawerPresence(open);
+
+  if (!mounted || !present) return null;
 
   return createPortal(
     <>
@@ -42,7 +52,7 @@ export function MobileNav({
       <div
         className={cn(
           "fixed inset-0 z-50 bg-black/60 transition-opacity duration-200 md:hidden",
-          open ? "opacity-100" : "pointer-events-none opacity-0"
+          shown ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={onClose}
         aria-hidden="true"
@@ -71,7 +81,7 @@ export function MobileNav({
         className={cn(
           "fixed inset-y-0 z-50 flex w-[82%] max-w-[340px] flex-col gap-8 bg-bg-dark p-lg transition-transform duration-200 ease-out md:hidden",
           locale === "ar" ? "right-0" : "left-0",
-          open ? "translate-x-0" : locale === "ar" ? "translate-x-full" : "-translate-x-full"
+          shown ? "translate-x-0" : locale === "ar" ? "translate-x-full" : "-translate-x-full"
         )}
         role="dialog"
         aria-modal="true"
@@ -104,11 +114,15 @@ export function MobileNav({
               {isAuthenticated ? dict.nav.account : dict.nav.login}
             </Button>
           </Link>
-          <Link href="/register" onClick={onClose}>
-            <Button variant="primary" className="w-full justify-center">
-              {dict.nav.register}
-            </Button>
-          </Link>
+          {isAuthenticated ? (
+            <SignOutButton fullWidth />
+          ) : (
+            <Link href="/register" onClick={onClose}>
+              <Button variant="primary" className="w-full justify-center">
+                {dict.nav.register}
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
     </>,

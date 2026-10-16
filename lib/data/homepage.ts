@@ -1,9 +1,26 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { query, queryOne } from "@/lib/db";
+
+/**
+ * Public homepage reads.
+ *
+ * No guard in this file, deliberately: everything here is filtered to
+ * `status = 'published'` and is meant to be seen by signed-out visitors,
+ * which is what the Postgres policies allowed anon to select. The
+ * published filter IS the authorization — drop it and a draft course
+ * appears on the front page.
+ *
+ * The nested Supabase selects (`teachers ( profiles ( full_name ) )`)
+ * become ordinary joins, and the aggregates that used to be computed in
+ * JavaScript over a full table read are now computed in SQL. That is not
+ * a stylistic change: `select("id", { count: "exact" })` fetched every
+ * matching row to count it, which is fine at ten courses and not at a
+ * thousand.
+ */
 
 // ---------------------------------------------------------------------
-// Homepage stats — the numbers shown in the Hero's stats panel. Every
-// value is a real aggregate query, no hardcoded figures.
+// Homepage stats — the numbers in the Hero's stats panel. Every value is
+// a real aggregate, no hardcoded figures.
 // ---------------------------------------------------------------------
 export type HomepageStats = {
   studentCount: number;
@@ -13,40 +30,46 @@ export type HomepageStats = {
 };
 
 export async function getHomepageStats(): Promise<HomepageStats> {
-  const supabase = await createClient();
+  try {
+    const [students, courses] = await Promise.all([
+      queryOne<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM profiles WHERE role = 'student' AND deleted_at IS NULL`
+      ),
+      queryOne<{ n: number; avg_rating: string | null; total_minutes: string | null }>(
+        /*
+          AVG over only the reviewed courses, via the CASE.
 
-  const [studentsRes, coursesRes] = await Promise.all([
-    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "student").is("deleted_at", null),
-    supabase
-      .from("courses")
-      .select("rating, rating_count, duration_minutes", { count: "exact" })
-      .eq("status", "published")
-      .is("deleted_at", null),
-  ]);
+          A course that nobody has rated carries rating = 0 by default,
+          and averaging those in would drag the platform figure toward
+          zero — the more new courses are published, the worse the
+          platform appears to be. CASE yields NULL for them, and SQL's
+          AVG skips NULLs, so unreviewed courses count toward the course
+          total without touching the rating.
+        */
+        `SELECT COUNT(*) AS n,
+                AVG(CASE WHEN rating_count > 0 THEN rating END) AS avg_rating,
+                SUM(duration_minutes) AS total_minutes
+           FROM courses
+          WHERE status = 'published' AND deleted_at IS NULL`
+      ),
+    ]);
 
-  const courses = coursesRes.data ?? [];
-  // Only courses with at least one real review contribute to the
-  // average — otherwise every never-reviewed course's rating=0 default
-  // would silently drag the platform-wide average down.
-  const reviewed = courses.filter((c) => c.rating_count > 0);
-  const avgRating = reviewed.length
-    ? Math.round((reviewed.reduce((sum, c) => sum + Number(c.rating), 0) / reviewed.length) * 10) / 10
-    : 0;
-  const totalMinutes = courses.reduce((sum, c) => sum + c.duration_minutes, 0);
-
-  return {
-    studentCount: studentsRes.count ?? 0,
-    courseCount: coursesRes.count ?? 0,
-    avgRating,
-    totalHours: Math.round(totalMinutes / 60),
-  };
+    return {
+      studentCount: Number(students?.n ?? 0),
+      courseCount: Number(courses?.n ?? 0),
+      avgRating: courses?.avg_rating ? Math.round(Number(courses.avg_rating) * 10) / 10 : 0,
+      totalHours: Math.round(Number(courses?.total_minutes ?? 0) / 60),
+    };
+  } catch {
+    return { studentCount: 0, courseCount: 0, avgRating: 0, totalHours: 0 };
+  }
 }
 
 // ---------------------------------------------------------------------
 // Featured courses — admin-curated via courses.is_featured/featured_order
-// (0033_featured_courses.sql). Only ever published courses, regardless
-// of the featured flag, so an admin toggling "featured" on a course
-// still mid-edit can never leak it onto the public homepage.
+// (0033). Published only, regardless of the featured flag, so an admin
+// toggling "featured" on a course still mid-edit cannot leak it onto the
+// public homepage.
 // ---------------------------------------------------------------------
 export type FeaturedCourse = {
   id: string;
@@ -64,69 +87,102 @@ export type FeaturedCourse = {
   isNew: boolean;
 };
 
+type FeaturedRow = {
+  id: string;
+  slug: string;
+  title: string;
+  cover_url: string | null;
+  rating: string;
+  rating_count: number;
+  students_count: number;
+  duration_minutes: number;
+  lessons_count: number;
+  min_price: string | null;
+  is_new: number;
+  teacher_name: string | null;
+  year_name: string | null;
+};
+
 export async function getFeaturedCourses(limit = 6): Promise<FeaturedCourse[]> {
-  const supabase = await createClient();
+  try {
+    const rows = await query<FeaturedRow>(
+      /*
+        LEFT JOIN on teacher and year, not INNER.
 
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        Both are NOT NULL columns, so an inner join would normally be
+        equivalent — but if a teacher row were ever missing, an inner
+        join would make the course silently vanish from the homepage
+        with no error anywhere. A left join shows the course with the
+        fallback name below instead, which is visible and fixable.
 
-  const { data } = await supabase
-    .from("courses")
-    .select(
-      `id, slug, title, cover_url, rating, rating_count, students_count, duration_minutes, lessons_count, min_price, created_at,
-       academic_years ( name_ar ),
-       teachers ( profiles ( full_name ) )`
-    )
-    .eq("status", "published")
-    .eq("is_featured", true)
-    .is("deleted_at", null)
-    .order("featured_order", { ascending: true, nullsFirst: false })
-    .limit(limit);
+        `is_new` is computed here rather than compared against an
+        ISO string in JS, so the 30-day boundary is measured on the
+        database's clock, in UTC, like every other time in this schema.
 
-  return (data ?? []).map((c) => {
-    const teacherRaw = Array.isArray(c.teachers) ? c.teachers[0] : c.teachers;
-    const profileRaw = teacherRaw
-      ? (Array.isArray(teacherRaw.profiles) ? teacherRaw.profiles[0] : teacherRaw.profiles)
-      : null;
-    const yearRaw = Array.isArray(c.academic_years) ? c.academic_years[0] : c.academic_years;
+        NULLs sort last in `featured_order ASC` in MariaDB — the same as
+        the `nullsFirst: false` the Supabase query asked for — so an
+        unordered featured course falls to the end rather than the front.
+      */
+      `SELECT c.id, c.slug, c.title, c.cover_url, c.rating, c.rating_count,
+              c.students_count, c.duration_minutes, c.lessons_count, c.min_price,
+              (c.created_at >= DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 30 DAY)) AS is_new,
+              p.full_name AS teacher_name,
+              ay.name_ar  AS year_name
+         FROM courses c
+         LEFT JOIN teachers t        ON t.id  = c.teacher_id
+         LEFT JOIN profiles p        ON p.id  = t.profile_id
+         LEFT JOIN academic_years ay ON ay.id = c.academic_year_id
+        WHERE c.status = 'published'
+          AND c.is_featured = 1
+          AND c.deleted_at IS NULL
+        ORDER BY c.featured_order ASC
+        LIMIT ?`,
+      [limit]
+    );
 
-    return {
+    return rows.map((c) => ({
       id: c.id,
       slug: c.slug,
       title: c.title,
       coverUrl: c.cover_url,
-      teacherName: profileRaw?.full_name ?? "أستاذ غير محدد",
-      yearName: yearRaw?.name_ar ?? "—",
+      teacherName: c.teacher_name ?? "أستاذ غير محدد",
+      yearName: c.year_name ?? "—",
       rating: Number(c.rating),
       ratingCount: c.rating_count,
       studentsCount: c.students_count,
       durationHours: Math.round(c.duration_minutes / 60),
+      // DECIMAL comes back as a string so money keeps its precision; the
+      // public type is a number, so convert only here.
+      minPrice: c.min_price === null ? null : Number(c.min_price),
       lessonsCount: c.lessons_count,
-      minPrice: c.min_price,
-      isNew: c.created_at >= thirtyDaysAgo,
-    };
-  });
+      isNew: c.is_new === 1,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------
-// Per-year published course counts — powers the real "count" shown on
-// each academic-year card, replacing the previously hardcoded numbers.
+// Per-year published course counts — the real "count" on each
+// academic-year card.
 // ---------------------------------------------------------------------
 export async function getAcademicYearCourseCounts(): Promise<Record<number, number>> {
-  const supabase = await createClient();
+  try {
+    // Was a full read of every published course, tallied in a JS loop.
+    const rows = await query<{ year_number: number; n: number }>(
+      `SELECT ay.year_number, COUNT(*) AS n
+         FROM courses c
+         JOIN academic_years ay ON ay.id = c.academic_year_id
+        WHERE c.status = 'published' AND c.deleted_at IS NULL
+        GROUP BY ay.year_number`
+    );
 
-  const { data } = await supabase
-    .from("courses")
-    .select("academic_years ( year_number )")
-    .eq("status", "published")
-    .is("deleted_at", null);
-
-  const counts: Record<number, number> = {};
-  for (const row of data ?? []) {
-    const yearRaw = Array.isArray(row.academic_years) ? row.academic_years[0] : row.academic_years;
-    const yearNumber = yearRaw?.year_number;
-    if (yearNumber) counts[yearNumber] = (counts[yearNumber] ?? 0) + 1;
+    const counts: Record<number, number> = {};
+    for (const row of rows) counts[row.year_number] = Number(row.n);
+    return counts;
+  } catch {
+    return {};
   }
-  return counts;
 }
 
 // ---------------------------------------------------------------------
@@ -143,41 +199,58 @@ export type HomepageTestimonial = {
   comment: string;
 };
 
+type TestimonialRow = {
+  id: string;
+  rating: number;
+  comment: string;
+  student_name: string;
+  course_title: string;
+  year_name: string | null;
+};
+
 export async function getHomepageTestimonials(limit = 3): Promise<HomepageTestimonial[]> {
-  const supabase = await createClient();
+  try {
+    return await query<TestimonialRow>(
+      /*
+        Inner joins to profiles and courses, plus the empty-string test.
 
-  const { data } = await supabase
-    .from("reviews")
-    .select(
-      `id, rating, comment,
-       profiles ( full_name, academic_years ( name_ar ) ),
-       courses ( title )`
-    )
-    .gte("rating", 4)
-    .not("comment", "is", null)
-    .is("deleted_at", null)
-    .order("rating", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(limit);
+        The Supabase version fetched rows, then dropped any whose author,
+        course or comment turned out to be missing — which meant asking
+        for 3 and sometimes rendering 2. Requiring them in the WHERE
+        clause means LIMIT counts only rows that will actually be shown.
 
-  return (data ?? [])
-    .map((r) => {
-      const profileRaw = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
-      const courseRaw = Array.isArray(r.courses) ? r.courses[0] : r.courses;
-      const yearRaw = profileRaw
-        ? (Array.isArray(profileRaw.academic_years) ? profileRaw.academic_years[0] : profileRaw.academic_years)
-        : null;
-
-      if (!profileRaw || !courseRaw || !r.comment) return null;
-
-      return {
+        `comment <> ''` as well as NOT NULL: the column is nullable here,
+        but a whitespace-only comment would pass a null check and render
+        as an empty quote card.
+      */
+      `SELECT r.id, r.rating, r.comment,
+              p.full_name AS student_name,
+              c.title     AS course_title,
+              ay.name_ar  AS year_name
+         FROM reviews r
+         JOIN profiles p             ON p.id  = r.user_id
+         JOIN courses  c             ON c.id  = r.course_id
+         LEFT JOIN academic_years ay ON ay.id = p.academic_year_id
+        WHERE r.rating >= 4
+          AND r.comment IS NOT NULL
+          AND TRIM(r.comment) <> ''
+          AND r.deleted_at IS NULL
+          AND c.status = 'published'
+          AND c.deleted_at IS NULL
+        ORDER BY r.rating DESC, r.created_at DESC
+        LIMIT ?`,
+      [limit]
+    ).then((rows) =>
+      rows.map((r) => ({
         id: r.id,
-        studentName: profileRaw.full_name,
-        courseTitle: courseRaw.title,
-        yearName: yearRaw?.name_ar ?? null,
+        studentName: r.student_name,
+        courseTitle: r.course_title,
+        yearName: r.year_name,
         rating: r.rating,
         comment: r.comment,
-      };
-    })
-    .filter((x): x is HomepageTestimonial => x !== null);
+      }))
+    );
+  } catch {
+    return [];
+  }
 }

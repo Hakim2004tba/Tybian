@@ -4,6 +4,7 @@ import { DashboardCourseCard } from "@/components/dashboard/DashboardCourseCard"
 import { Pagination } from "@/components/dashboard/Pagination";
 import { Reveal } from "@/components/ui/Reveal";
 import { Card } from "@/components/ui/Card";
+import { getDictionary } from "@/lib/i18n/locale";
 
 /**
  * Paginated: fetches only ONE page of enrollments (6 courses), then
@@ -18,6 +19,8 @@ export async function MyCoursesSection({
   page: number;
   currentParams: Record<string, string | undefined>;
 }) {
+  const { dict } = await getDictionary();
+  const t = dict.dash;
   const user = await getSessionUser();
   const { items: courses, totalCount, pageSize } = await getEnrolledCoursesPage(user!.id, page);
 
@@ -25,7 +28,7 @@ export async function MyCoursesSection({
     return (
       <Card>
         <p className="text-[14px] text-text-secondary-light">
-          لا توجد دورات مسجَّل بها بعد.
+          {t.courses.noEnrolled}
         </p>
       </Card>
     );
@@ -39,9 +42,17 @@ export async function MyCoursesSection({
 
   return (
     <div>
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+      {/* Capped at 2 columns: this grid now sits in the ~700px left rail
+          of the dashboard, where the previous xl:grid-cols-3 produced
+          ~210px cards. Below xl the rail becomes full width and two
+          columns still read correctly. */}
+      <div className="grid gap-5 sm:grid-cols-2">
         {courses.map((course, i) => (
-          <Reveal key={course.id} delay={Math.min(i, 6) * 50}>
+          /* min-w-0: a grid item defaults to min-width:auto, so a
+             child wider than the column — a long unbroken course title
+             — widens the TRACK instead of wrapping, and the whole grid
+             pushes off a phone screen. */
+          <Reveal key={course.id} delay={Math.min(i, 6) * 50} className="min-w-0">
             <DashboardCourseCard course={course} progress={progressByCourse.get(course.id)} />
           </Reveal>
         ))}

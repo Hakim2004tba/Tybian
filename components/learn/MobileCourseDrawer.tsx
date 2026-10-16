@@ -7,6 +7,8 @@ import type { LearnSection } from "@/lib/data/learn";
 import type { Locale } from "@/lib/i18n/dictionaries";
 import { CourseContentTree } from "@/components/learn/CourseContentTree";
 import { cn } from "@/lib/utils";
+import { useDrawerPresence } from "@/lib/ui/drawer-presence";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 /**
  * Mobile-only (lg:hidden) — a "☰ محتوى الدورة" trigger that opens the
@@ -38,6 +40,11 @@ export function MobileCourseDrawer({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // Unmounted while closed, so a phone does not count the parked
+  // drawer as page width — see lib/ui/drawer-presence.
+  const { present, shown } = useDrawerPresence(open);
+  const { t } = useI18n();
+
   return (
     <div className="lg:hidden">
       <button
@@ -45,10 +52,11 @@ export function MobileCourseDrawer({
         className="flex items-center gap-2 rounded-md border border-border-dark bg-elevated-dark px-3.5 py-2 text-[13px] text-text-secondary-dark"
       >
         <List size={15} />
-        محتوى الدورة
+        {t.learn.courseContent}
       </button>
 
       {mounted &&
+        present &&
         createPortal(
           <>
             {/* Rendered via createPortal directly into document.body —
@@ -63,7 +71,7 @@ export function MobileCourseDrawer({
             <div
               className={cn(
                 "fixed inset-0 z-50 bg-black/60 transition-opacity duration-200",
-                open ? "opacity-100" : "pointer-events-none opacity-0"
+                shown ? "opacity-100" : "pointer-events-none opacity-0"
               )}
               onClick={() => setOpen(false)}
               aria-hidden="true"
@@ -72,15 +80,15 @@ export function MobileCourseDrawer({
               className={cn(
                 "fixed inset-y-0 z-50 flex w-[86%] max-w-[360px] flex-col bg-bg-dark text-text-secondary-dark transition-transform duration-200 ease-out",
                 locale === "ar" ? "right-0" : "left-0",
-                open ? "translate-x-0" : locale === "ar" ? "translate-x-full" : "-translate-x-full"
+                shown ? "translate-x-0" : locale === "ar" ? "translate-x-full" : "-translate-x-full"
               )}
               role="dialog"
               aria-modal="true"
-              aria-label="محتوى الدورة"
+              aria-label={t.learn.courseContent}
             >
               <div className="flex items-center justify-between border-b border-border-dark p-lg pb-4">
                 <h2 className="truncate text-[16px] text-text-primary-dark">{courseTitle}</h2>
-                <button onClick={() => setOpen(false)} aria-label="إغلاق" className="shrink-0 text-text-secondary-dark">
+                <button onClick={() => setOpen(false)} aria-label={t.learn.close} className="shrink-0 text-text-secondary-dark">
                   <X size={20} />
                 </button>
               </div>

@@ -1,30 +1,28 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/auth/session";
+import { upsertProgress } from "@/lib/data/lesson-progress-write";
 
 export type ProgressActionState = { error: string | null };
 
 /**
- * Called by the video player page to persist "last position" / "watched
- * to completion" — owned entirely by the student's own RLS-scoped
- * session (lesson_progress_owner_all policy, 0009_rls_policies.sql), no
- * admin/service_role involved. A student can only ever write their own
- * row here; RLS rejects any attempt to write another user's progress
- * regardless of what lessonId/userId this function is called with,
- * because the policy checks `user_id = auth.uid()` against the row
- * being written, not against a client-supplied field.
+ * Persists "last position" and "watched to completion" from the player.
  *
- * Intentionally does NOT re-run the full playback authorization chain
- * (enrollment/expiration/etc.) — by the time this is called the player
- * already has a valid signed Bunny URL from /api/lessons/:id/playback,
- * and progress-tracking for a lesson the student can't actually watch
- * is harmless (an orphaned progress row with no access implications).
+ * The row written is always the session's own: `user_id` comes from
+ * getSessionUser(), never from an argument, so a forged call can only
+ * ever affect the caller's own progress. That used to be guaranteed
+ * twice — here and by lesson_progress_owner_all — and is now guaranteed
+ * once, here.
  *
- * `courseSlug` is optional and only used to revalidate the learn page's
- * sidebar (✓/▶ marks) and the dashboard's progress bars after a
- * completion — omitted for the frequent throttled position-only saves
- * to avoid unnecessary cache invalidation on every 15s tick.
+ * Deliberately does NOT re-run the playback authorization chain. By the
+ * time this is called the player already holds a signed URL from
+ * /api/lessons/:id/playback, and a progress row for a lesson nobody can
+ * watch is inert: it grants nothing and is read back only by its owner.
+ *
+ * `courseSlug` is optional and only revalidates the sidebar ticks and
+ * dashboard bars after a completion — omitted for the throttled
+ * position-only saves so a 15-second tick does not invalidate caches.
  */
 export async function updateLessonProgressAction(
   lessonId: string,
@@ -32,25 +30,25 @@ export async function updateLessonProgressAction(
   completed: boolean,
   courseSlug?: string
 ): Promise<ProgressActionState> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const user = await getSessionUser();
   if (!user) return { error: "الرجاء تسجيل الدخول" };
 
-  const { error } = await supabase.from("lesson_progress").upsert(
-    {
-      user_id: user.id,
-      lesson_id: lessonId,
-      last_position_seconds: Math.max(0, Math.floor(positionSeconds)),
-      is_completed: completed,
-      completed_at: completed ? new Date().toISOString() : null,
-    },
-    { onConflict: "user_id,lesson_id" }
-  );
+  /*
+    A player that mounts and unmounts without the student watching
+    anything used to write a row at position 0 for every lesson merely
+    opened. Those rows are indistinguishable from real progress in every
+    count that follows, so nothing is recorded until there is something
+    to record. Carried over from the pre-migration code, where it was
+    added to fix exactly that.
+  */
+  const position = Math.max(0, Math.floor(positionSeconds));
+  if (!completed && position === 0) return { error: null };
 
-  if (error) return { error: "تعذّر حفظ تقدّم المشاهدة" };
+  try {
+    await upsertProgress(user.id, lessonId, position, completed);
+  } catch {
+    return { error: "تعذّر حفظ تقدّم المشاهدة" };
+  }
 
   if (completed && courseSlug) {
     revalidatePath(`/courses/${courseSlug}/learn`);
@@ -61,27 +59,15 @@ export async function updateLessonProgressAction(
 }
 
 /**
- * The manual "تم إكمال الدرس" button — reads the existing saved
- * position first so marking complete never regresses a student's
- * resume point back to 0 (which the plain upsert above would do if
- * called with positionSeconds=0 directly).
+ * The manual "تم إكمال الدرس" button.
+ *
+ * Passes 0 for the position and lets the upsert's GREATEST() keep
+ * whatever was already saved — marking a lesson complete must never
+ * rewind the student's resume point to the beginning.
  */
 export async function markLessonCompleteAction(
   lessonId: string,
   courseSlug: string
 ): Promise<ProgressActionState> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "الرجاء تسجيل الدخول" };
-
-  const { data: existing } = await supabase
-    .from("lesson_progress")
-    .select("last_position_seconds")
-    .eq("user_id", user.id)
-    .eq("lesson_id", lessonId)
-    .maybeSingle();
-
-  return updateLessonProgressAction(lessonId, existing?.last_position_seconds ?? 0, true, courseSlug);
+  return updateLessonProgressAction(lessonId, 0, true, courseSlug);
 }

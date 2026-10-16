@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/Card";
 import { AdminTable } from "@/components/admin/AdminTable";
 import { Pagination } from "@/components/dashboard/Pagination";
 import { listReviewsAdmin } from "@/lib/data/admin-listings";
+import { DeleteReviewButton } from "@/components/admin/reviews/DeleteReviewButton";
 
 const dateFormatter = new Intl.DateTimeFormat("ar-DZ", { day: "2-digit", month: "2-digit", year: "numeric" });
 
@@ -34,6 +35,7 @@ export default async function AdminReviewsPage({
             { header: "التقييم", cell: (r) => <span className="num text-gold">{"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}</span> },
             { header: "التعليق", cell: (r) => <span className="line-clamp-1 max-w-[260px] text-text-secondary-light">{r.comment ?? "—"}</span> },
             { header: "التاريخ", cell: (r) => <span className="num text-text-muted-light">{dateFormatter.format(new Date(r.created_at))}</span> },
+            { header: "", cell: (r) => <DeleteReviewButton reviewId={r.id} /> },
           ]}
         />
       </Card>

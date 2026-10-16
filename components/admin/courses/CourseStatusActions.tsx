@@ -40,14 +40,38 @@ export function CourseStatusActions({
     });
   }
 
+  /**
+   * Two-step delete. The first call reports how many students still have
+   * active access instead of refusing outright; the admin then confirms
+   * knowing the real cost, and the second call revokes those enrolments
+   * along with the course. Enrolled students no longer make deletion
+   * impossible — they make it a decision.
+   */
   function runDelete() {
-    if (!window.confirm("حذف هذه الدورة نهائياً؟ لا يمكن التراجع عن هذا الإجراء.")) return;
+    if (!window.confirm("حذف هذه الدورة؟")) return;
     startTransition(async () => {
-      const result = await deleteCourseAction(courseId);
-      if (result?.error) {
-        window.alert(result.error);
+      const first = await deleteCourseAction(courseId);
+
+      if (first?.error) {
+        window.alert(first.error);
         return;
       }
+
+      if (first?.requiresConfirmation) {
+        const n = first.activeEnrollments;
+        const confirmed = window.confirm(
+          `تنبيه: ${n} ${n === 1 ? "طالب يملك" : "طالباً يملكون"} وصولاً فعّالاً إلى هذه الدورة.\n\n` +
+            "المتابعة ستحذف الدورة وتُلغي تسجيلاتهم. هل تريد المتابعة؟"
+        );
+        if (!confirmed) return;
+
+        const second = await deleteCourseAction(courseId, true);
+        if (second?.error) {
+          window.alert(second.error);
+          return;
+        }
+      }
+
       router.push("/admin/courses");
     });
   }

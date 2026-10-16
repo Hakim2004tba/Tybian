@@ -38,7 +38,7 @@ export default async function AdminVideosPage({
           <Badge variant="violet">الفيديوهات</Badge>
           <h1 className="mt-3 text-2xl">مكتبة الفيديوهات</h1>
           <p className="mt-1 text-text-secondary-light">
-            <span className="num">{totalCount}</span> فيديو — من Bunny Stream أو يوتيوب
+            <span className="num">{totalCount}</span> فيديو — من Vimeo أو يوتيوب
           </p>
         </div>
         <JumpToCourseStructure
@@ -63,7 +63,7 @@ export default async function AdminVideosPage({
                   </Badge>
                 ) : (
                   <Badge variant="violet" className="flex w-fit items-center gap-1">
-                    <Cloud size={11} /> Bunny
+                    <Cloud size={11} /> Vimeo
                   </Badge>
                 ),
             },

@@ -1,7 +1,7 @@
 import { ButtonHTMLAttributes, forwardRef } from "react";
 import { cn } from "@/lib/utils";
 
-type Variant = "primary" | "gold" | "outline" | "ghost";
+type Variant = "primary" | "gold" | "outline" | "outlineOnDark" | "ghost";
 type Size = "sm" | "md";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -16,6 +16,14 @@ const variantClasses: Record<Variant, string> = {
   outline:
     "bg-transparent border border-border-light text-text-primary-light hover:border-primary hover:text-primary dark:border-border-dark dark:text-text-primary-dark",
   ghost: "bg-transparent text-text-secondary-light hover:text-primary",
+  /*
+    `outline` is drawn for a light page — a grey border and dark text.
+    On the academy.deep rail that came out as near-invisible text inside
+    a near-invisible box, which is how sign-out looked. This is the same
+    shape with the contrast inverted.
+  */
+  outlineOnDark:
+    "bg-white/[0.06] border border-white/20 text-white/90 hover:bg-white/[0.12] hover:border-white/35 hover:text-white",
 };
 
 const sizeClasses: Record<Size, string> = {

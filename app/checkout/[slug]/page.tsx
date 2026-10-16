@@ -7,10 +7,13 @@ import { getCourseBySlug } from "@/lib/data/course-details";
 import { getOrCreatePendingOrder, type PlanType } from "@/lib/actions/checkout";
 import { PayNowForm } from "@/components/checkout/PayNowForm";
 import { CheckStatusForm } from "@/components/checkout/CheckStatusForm";
+import { getDictionary } from "@/lib/i18n/locale";
 
-const planLabel: Record<string, string> = {
-  three_months: "اشتراك 3 أشهر",
-  lifetime: "اشتراك مدى الحياة",
+/* Maps the stored plan type to a dictionary key, so the plan's name
+   follows the reader's language while the stored value never moves. */
+const planLabel: Record<string, "threeMonths" | "lifetime"> = {
+  three_months: "threeMonths",
+  lifetime: "lifetime",
 };
 
 const currency = new Intl.NumberFormat("en-US");
@@ -32,10 +35,12 @@ export default async function CheckoutPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ plan?: string }>;
+  searchParams: Promise<{ plan?: string; promo?: string }>;
 }) {
+  const { dict } = await getDictionary();
+  const t = dict.checkout;
   const { slug } = await params;
-  const { plan } = await searchParams;
+  const { plan, promo } = await searchParams;
 
   await requireAuth(`/checkout/${slug}`);
 
@@ -43,7 +48,7 @@ export default async function CheckoutPage({
   if (!course) notFound();
 
   const planType: PlanType = plan === "lifetime" ? "lifetime" : "three_months";
-  const result = await getOrCreatePendingOrder(course.id, planType);
+  const result = await getOrCreatePendingOrder(course.id, planType, promo);
 
   if (result.kind === "already_enrolled") {
     redirect(`/courses/${slug}`);
@@ -69,13 +74,33 @@ export default async function CheckoutPage({
         </div>
 
         <div className="mt-4 text-center">
-          <Badge variant="violet">إتمام الاشتراك</Badge>
+          <Badge variant="violet">{t.title}</Badge>
           <h1 className="mt-2 text-xl">{course.title}</h1>
-          <p className="mt-1 text-[14px] text-text-secondary-light">{planLabel[order.planType]}</p>
+          <p className="mt-1 text-[14px] text-text-secondary-light">{t[planLabel[order.planType]]}</p>
+
+          {/*
+            A GET form, not a client action: the page already re-prices
+            the order on the server for whatever `promo` it is given, so
+            submitting is just asking for the same page with a code. The
+            discount never exists in the browser.
+          */}
+          <form className="mt-4 flex items-center gap-2">
+            <input type="hidden" name="plan" value={plan ?? "three_months"} />
+            <input
+              name="promo"
+              defaultValue={promo ?? ""}
+              placeholder={t.promoPlaceholder}
+              style={{ textTransform: "uppercase" }}
+              className="min-w-0 flex-1 rounded-sm border border-border-light bg-surface-light px-3 py-2 text-[13.5px] outline-none focus:border-primary"
+            />
+            <button className="shrink-0 rounded-full bg-primary px-4 py-2 text-[13px] font-semibold text-white">
+              {t.promoApply}
+            </button>
+          </form>
         </div>
 
         <div className="mt-5 flex items-center justify-between rounded-md border border-border-light bg-bg-light px-4 py-3">
-          <span className="text-[14px] text-text-secondary-light">المبلغ الإجمالي</span>
+          <span className="text-[14px] text-text-secondary-light">{t.total}</span>
           <span className="num text-[18px] font-bold">
             {currency.format(order.amount)} {order.currency}
           </span>
@@ -87,7 +112,7 @@ export default async function CheckoutPage({
 
         <div className="mt-4 flex items-center gap-1.5 text-[11.5px] text-text-muted-light">
           <ShieldCheck size={13} />
-          يُفعَّل وصولك فقط بعد تأكيد الدفع من مزوّد الدفع مباشرة على الخادم.
+          {t.note}
         </div>
 
         <div className="mt-4 border-t border-border-light pt-3">

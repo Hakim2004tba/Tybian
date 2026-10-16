@@ -1,5 +1,6 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { query } from "@/lib/db";
+import { requireAdmin } from "@/lib/db/guard";
 
 export type ReportRow = {
   id: string;
@@ -14,41 +15,46 @@ export type ReportRow = {
   commentLessonTitle: string | null;
 };
 
+/**
+ * The moderation queue. Admin only — content_reports had no select policy
+ * for anyone else, and this exposes both the reporter's identity and the
+ * reported text.
+ */
 export async function getOpenReports(): Promise<ReportRow[]> {
-  const supabase = await createClient();
+  await requireAdmin();
 
-  const { data: reports } = await supabase
-    .from("content_reports")
-    .select("id, target_type, target_id, reason, status, created_at, profiles ( full_name )")
-    .eq("status", "pending")
-    .order("created_at", { ascending: false })
-    .limit(50);
+  /*
+    One query where there were two.
 
-  if (!reports?.length) return [];
-
-  const commentIds = reports.filter((r) => r.target_type === "comment").map((r) => r.target_id);
-
-  const { data: comments } = commentIds.length
-    ? await supabase.from("comments").select("id, body, lessons ( title )").in("id", commentIds)
-    : { data: [] as { id: string; body: string; lessons: { title: string } | { title: string }[] | null }[] };
-
-  const commentById = new Map((comments ?? []).map((c) => [c.id, c]));
-
-  return reports.map((r) => {
-    const reporterRaw = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
-    const comment = r.target_type === "comment" ? commentById.get(r.target_id) : undefined;
-    const lessonRaw = comment ? (Array.isArray(comment.lessons) ? comment.lessons[0] : comment.lessons) : null;
-
-    return {
+    `target_id` points into one of three tables depending on
+    `target_type`, so it cannot be a foreign key and the join to comments
+    has to be conditional — hence the AND on target_type inside the LEFT
+    JOIN rather than in the WHERE clause, which would drop review reports
+    entirely.
+  */
+  return query<ReportRow & { reporter_name: string | null }>(
+    `SELECT r.id, r.target_type, r.target_id, r.reason, r.status, r.created_at,
+            p.full_name AS reporter_name,
+            cm.body     AS commentBody,
+            l.title     AS commentLessonTitle
+       FROM content_reports r
+       LEFT JOIN profiles p  ON p.id = r.reporter_id
+       LEFT JOIN comments cm ON cm.id = r.target_id AND r.target_type = 'comment'
+       LEFT JOIN lessons l   ON l.id = cm.lesson_id
+      WHERE r.status = 'pending'
+      ORDER BY r.created_at DESC
+      LIMIT 50`
+  ).then((rows) =>
+    rows.map((r) => ({
       id: r.id,
       target_type: r.target_type,
       target_id: r.target_id,
       reason: r.reason,
       status: r.status,
       created_at: r.created_at,
-      reporter: reporterRaw ?? null,
-      commentBody: comment?.body ?? null,
-      commentLessonTitle: lessonRaw?.title ?? null,
-    };
-  });
+      reporter: r.reporter_name ? { full_name: r.reporter_name } : null,
+      commentBody: r.commentBody ?? null,
+      commentLessonTitle: r.commentLessonTitle ?? null,
+    }))
+  );
 }

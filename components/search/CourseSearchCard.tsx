@@ -1,14 +1,16 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Star, Users, Clock, BookOpen } from "lucide-react";
+import { Star, Users, Clock, PlayCircle, BookOpen } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import type { CourseSearchResult } from "@/lib/data/course-search";
+import { formatCourseMinutes } from "@/lib/format/duration";
+import { getDictionary } from "@/lib/i18n/locale";
 
 const currency = new Intl.NumberFormat("en-US");
-const levelLabel: Record<string, string> = { beginner: "مبتدئ", intermediate: "متوسط", advanced: "متقدم" };
-
-export function CourseSearchCard({ course }: { course: CourseSearchResult }) {
+export async function CourseSearchCard({ course }: { course: CourseSearchResult }) {
+  const { dict } = await getDictionary();
+  const t = dict.search;
   const teacherName = course.teachers?.profiles?.full_name ?? null;
 
   return (
@@ -27,7 +29,6 @@ export function CourseSearchCard({ course }: { course: CourseSearchResult }) {
         <div className="flex flex-1 flex-col p-lg">
           <div className="flex flex-wrap gap-1.5">
             {course.academic_years && <Badge variant="violet">{course.academic_years.name_ar}</Badge>}
-            <Badge variant="muted">{levelLabel[course.level] ?? course.level}</Badge>
           </div>
 
           <h3 className="mt-2.5 text-[15px] leading-snug">{course.title}</h3>
@@ -43,16 +44,26 @@ export function CourseSearchCard({ course }: { course: CourseSearchResult }) {
               {course.students_count}
             </span>
             <span className="flex items-center gap-1">
-              <Clock size={12} />
-              {Math.floor(course.duration_minutes / 60)}س
+              <PlayCircle size={12} />
+              {course.lessons_count} {t.lessons}
             </span>
+            {/* Duration is only shown once it is actually known. The card
+                used to print "0س" for every course, because YouTube's
+                oEmbed does not report duration and nothing had filled it
+                in — a stated zero is worse than an honest dash. */}
+            {course.duration_minutes > 0 && (
+              <span className="flex items-center gap-1">
+                <Clock size={12} />
+                {formatCourseMinutes(course.duration_minutes)}
+              </span>
+            )}
           </div>
 
           <div className="mt-auto pt-4">
             {course.min_price !== null ? (
-              <span className="num text-[16px] font-bold">{currency.format(course.min_price)} دج</span>
+              <span className="num text-[16px] font-bold">{currency.format(course.min_price)} {t.currency}</span>
             ) : (
-              <span className="text-[13px] text-text-muted-light">السعر غير متاح</span>
+              <span className="text-[13px] text-text-muted-light">{t.priceUnavailable}</span>
             )}
           </div>
         </div>

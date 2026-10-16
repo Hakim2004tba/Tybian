@@ -5,6 +5,7 @@ import { SubmitButton } from "@/components/auth/SubmitButton";
 import { Input } from "@/components/ui/Input";
 import { getAcademicYears } from "@/lib/data/academic-years";
 import { getDictionary } from "@/lib/i18n/locale";
+import { GoogleButton } from "@/components/auth/GoogleButton";
 
 /**
  * Public self-registration always creates a `student` account — the
@@ -69,6 +70,8 @@ export default async function RegisterPage() {
             <SubmitButton className="mt-2 w-full justify-center">{dict.auth.registerButton}</SubmitButton>
           </div>
         </AuthForm>
+
+        <GoogleButton />
 
         <p className="mt-6 text-center text-[14px]">
           {dict.auth.haveAccount}{" "}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Container } from "@/components/layout/Container";
 import { Button } from "@/components/ui/Button";
 import { Reveal } from "@/components/ui/Reveal";
+import { getDictionary } from "@/lib/i18n/locale";
 
 /**
  * Uses the standard violet glow — matches the rest of the page's single
@@ -10,7 +11,10 @@ import { Reveal } from "@/components/ui/Reveal";
  * (see DESIGN_DECISIONS.md D-002: gold stays reserved for lifetime
  * plan/premium moments specifically).
  */
-export function CTASection() {
+export async function CTASection() {
+  const { dict } = await getDictionary();
+  const t = dict.home.cta;
+
   return (
     <section className="relative overflow-hidden bg-bg-dark py-4xl">
       <div
@@ -19,20 +23,15 @@ export function CTASection() {
       />
       <Container className="relative text-center">
         <Reveal>
-          <h2 className="mx-auto max-w-xl text-text-primary-dark">
-            ابدأ رحلتك الطبية اليوم مع تبيان
-          </h2>
-          <p className="mx-auto mt-4 max-w-md text-text-secondary-dark">
-            انضم إلى آلاف طلبة الطب الذين يبنون مسارهم الدراسي بثقة، خطوة
-            بخطوة، من السنة الأولى إلى التخرج.
-          </p>
+          <h2 className="mx-auto max-w-xl text-text-primary-dark">{t.title}</h2>
+          <p className="mx-auto mt-4 max-w-md text-text-secondary-dark">{t.body}</p>
           <div className="mt-8 flex flex-wrap justify-center gap-4">
             <Link href="/register">
-              <Button variant="primary">ابدأ التعلم</Button>
+              <Button variant="primary">{t.primary}</Button>
             </Link>
             <Link href="/courses">
               <Button variant="outline" className="border-border-dark text-text-primary-dark">
-                استكشف الدورات
+                {t.secondary}
               </Button>
             </Link>
           </div>

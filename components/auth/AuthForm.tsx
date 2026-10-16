@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import type { ActionState } from "@/lib/auth/actions";
 
 type ServerAction = (prev: ActionState, formData: FormData) => Promise<ActionState>;
@@ -24,6 +24,19 @@ export function AuthForm({
     error: null,
     success: null,
   });
+
+  /*
+    A full page load, not router.push().
+
+    The action no longer redirects by itself — see the note on
+    ActionState in lib/auth/actions.ts. router.push() would go back
+    through the same RSC fetch that is being corrupted upstream, so this
+    deliberately leaves the SPA and asks the browser for the page.
+    Slower by one navigation, and immune to it.
+  */
+  useEffect(() => {
+    if (state.redirectTo) window.location.assign(state.redirectTo);
+  }, [state.redirectTo]);
 
   return (
     <form action={formAction} className={className} noValidate>

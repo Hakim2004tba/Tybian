@@ -1,11 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { execute, newId } from "@/lib/db";
 import { requireRouteAccess } from "@/lib/auth/session";
 
-export type ActionState = { error: string | null; success?: string | null };
+export type ActionState = { error: string | null; success?: string | null; redirectTo?: string };
 
 function slugify(input: string): string {
   return input
@@ -16,7 +15,13 @@ function slugify(input: string): string {
     .toLowerCase();
 }
 
-export async function createArticleAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+/** MariaDB's duplicate-key code, where Postgres said 23505. */
+const isDuplicate = (error: unknown) => (error as { code?: string }).code === "ER_DUP_ENTRY";
+
+export async function createArticleAction(
+  _prev: ActionState,
+  formData: FormData
+): Promise<ActionState> {
   const user = await requireRouteAccess("/admin");
 
   const title = String(formData.get("title") ?? "").trim();
@@ -31,20 +36,31 @@ export async function createArticleAction(_prev: ActionState, formData: FormData
   const slug = slugify(slugInput || title);
   if (!slug) return { error: "تعذّر توليد رابط صالح من العنوان" };
 
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("articles")
-    .insert({ title, slug, excerpt, body, cover_url: coverUrl, author_id: user.id })
-    .select("id")
-    .single();
+  const id = newId();
 
-  if (error) {
-    if (error.code === "23505") return { error: "هذا الرابط (slug) مستخدم بالفعل" };
-    return { error: "تعذّر إنشاء المقال: " + error.message };
+  try {
+    await execute(
+      `INSERT INTO articles (id, title, slug, excerpt, body, cover_url, author_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, title, slug, excerpt, body, coverUrl, user.id]
+    );
+  } catch (error) {
+    if (isDuplicate(error)) return { error: "هذا الرابط (slug) مستخدم بالفعل" };
+    return { error: "تعذّر إنشاء المقال: " + (error as Error).message };
   }
 
   revalidatePath("/admin/articles");
-  redirect(`/admin/articles/${data.id}`);
+
+  /*
+    Returned, not redirect()ed.
+
+    A server action's own redirect comes back as a 303 with an RSC stream
+    the client must parse, and on this host that response is served from
+    a cache — the browser then reads a page payload where it expects an
+    action result and throws. The caller navigates instead. Same reason
+    as sign-in; see lib/auth/actions.ts.
+  */
+  return { error: null, redirectTo: `/admin/articles/${id}` };
 }
 
 export async function updateArticleAction(
@@ -65,14 +81,15 @@ export async function updateArticleAction(
 
   const slug = slugify(slugInput || title);
 
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("articles")
-    .update({ title, slug, excerpt, body, cover_url: coverUrl })
-    .eq("id", articleId);
-
-  if (error) {
-    if (error.code === "23505") return { error: "هذا الرابط (slug) مستخدم بالفعل" };
+  try {
+    await execute(
+      `UPDATE articles
+          SET title = ?, slug = ?, excerpt = ?, body = ?, cover_url = ?
+        WHERE id = ?`,
+      [title, slug, excerpt, body, coverUrl, articleId]
+    );
+  } catch (error) {
+    if (isDuplicate(error)) return { error: "هذا الرابط (slug) مستخدم بالفعل" };
     return { error: "تعذّر حفظ التعديلات" };
   }
 
@@ -83,14 +100,17 @@ export async function updateArticleAction(
 
 export async function togglePublishArticleAction(articleId: string, publish: boolean) {
   await requireRouteAccess("/admin");
-  const supabase = await createClient();
 
-  const { error } = await supabase
-    .from("articles")
-    .update({ is_published: publish, published_at: publish ? new Date().toISOString() : null })
-    .eq("id", articleId);
-
-  if (error) return { error: "تعذّر تحديث حالة النشر" };
+  try {
+    await execute(
+      `UPDATE articles
+          SET is_published = ?, published_at = ${publish ? "UTC_TIMESTAMP(3)" : "NULL"}
+        WHERE id = ?`,
+      [publish ? 1 : 0, articleId]
+    );
+  } catch {
+    return { error: "تعذّر تحديث حالة النشر" };
+  }
 
   revalidatePath("/admin/articles");
   revalidatePath(`/admin/articles/${articleId}`);
@@ -99,14 +119,12 @@ export async function togglePublishArticleAction(articleId: string, publish: boo
 
 export async function deleteArticleAction(articleId: string) {
   await requireRouteAccess("/admin");
-  const supabase = await createClient();
 
-  const { error } = await supabase
-    .from("articles")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", articleId);
-
-  if (error) return { error: "تعذّر حذف المقال" };
+  try {
+    await execute(`UPDATE articles SET deleted_at = UTC_TIMESTAMP(3) WHERE id = ?`, [articleId]);
+  } catch {
+    return { error: "تعذّر حذف المقال" };
+  }
 
   revalidatePath("/admin/articles");
   return { error: null };

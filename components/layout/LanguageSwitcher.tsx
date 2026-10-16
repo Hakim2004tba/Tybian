@@ -5,12 +5,25 @@ import { Languages } from "lucide-react";
 import { setLocaleAction } from "@/lib/actions/locale";
 import type { Locale } from "@/lib/i18n/dictionaries";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
-export function LanguageSwitcher({ currentLocale }: { currentLocale: Locale }) {
+/**
+ * `currentLocale` is optional: without it the switcher reads the active
+ * language from context.
+ *
+ * It used to be required, so dropping the switcher into a screen meant
+ * threading the locale down to it — which is why it existed only in the
+ * marketing navbar, and the dashboard and admin areas (where the
+ * marketing chrome is deliberately hidden) had no way to change
+ * language at all.
+ */
+export function LanguageSwitcher({ currentLocale }: { currentLocale?: Locale }) {
   const [pending, startTransition] = useTransition();
+  const { locale: contextLocale } = useI18n();
+  const active = currentLocale ?? contextLocale;
 
   function switchTo(locale: Locale) {
-    if (locale === currentLocale) return;
+    if (locale === active) return;
     startTransition(() => {
       setLocaleAction(locale).then(() => {
         window.location.reload(); // dir/lang on <html> needs a full reload
@@ -26,7 +39,7 @@ export function LanguageSwitcher({ currentLocale }: { currentLocale: Locale }) {
         disabled={pending}
         className={cn(
           "rounded-full px-2.5 py-1 transition-colors",
-          currentLocale === "ar" ? "bg-primary text-white" : "text-text-muted-light hover:text-primary"
+          active === "ar" ? "bg-primary text-white" : "text-text-muted-light hover:text-primary"
         )}
       >
         ع
@@ -36,7 +49,7 @@ export function LanguageSwitcher({ currentLocale }: { currentLocale: Locale }) {
         disabled={pending}
         className={cn(
           "rounded-full px-2.5 py-1 transition-colors",
-          currentLocale === "en" ? "bg-primary text-white" : "text-text-muted-light hover:text-primary"
+          active === "en" ? "bg-primary text-white" : "text-text-muted-light hover:text-primary"
         )}
       >
         EN

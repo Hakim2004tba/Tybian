@@ -1,68 +1,84 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { canAccessPath, getRedirectFor, type AppRole } from "@/lib/auth/route-access";
+import { getRequiredAccess, getRedirectFor } from "@/lib/auth/route-access";
 
 /**
- * TIBYAN root middleware — two jobs:
- *  1. Refresh the Supabase auth session cookie on every navigation
- *     (required by @supabase/ssr so Server Components see a valid session).
- *  2. First-layer route protection using the SAME canAccessPath() policy
- *     that lib/auth/session.ts uses server-side in layouts, and that
- *     tests/route-access.test.ts unit-tests directly.
+ * TIBYAN root middleware — the cheap first pass.
  *
- * This is layer 1 of 3: middleware (fast, edge) → layout server guard
- * (defense in depth) → Postgres RLS (the real data boundary, applies
- * even if both application layers had a bug).
+ * The Supabase version did two things here: refresh the auth cookie, and
+ * decide access from the role in the JWT. Both are gone.
+ *
+ * There is no cookie to refresh — a session is a row now, and its id in
+ * an httpOnly cookie. And the role cannot be read here at all: middleware
+ * runs on the Edge runtime, which has no TCP sockets, so `mysql2` cannot
+ * run in this file. Reading a role would mean a database round trip, and
+ * there is nowhere to make one from.
+ *
+ * So this layer answers only the question it can answer without asking
+ * the database: is there a session cookie at all? That is enough to send
+ * signed-out visitors to /login without loading a page they cannot see.
+ *
+ * Everything finer — student vs teacher vs admin — is decided by
+ * `requireRouteAccess()` in each area's layout (app/admin, app/teacher,
+ * app/student, app/dashboard all call it), which runs in the Node runtime
+ * and reads the role from `profiles` on every request. That is now the
+ * authoritative check rather than the second of three: the third layer,
+ * Postgres RLS, does not exist on MariaDB.
+ *
+ * The practical consequence, and it is deliberate: a student who types
+ * /admin is no longer stopped here. They reach the layout, which
+ * redirects them to /unauthorized before rendering anything or reading
+ * any data. One extra hop, same outcome, no weaker.
+ *
+ * The cookie is NOT trusted as proof of anything. Holding a made-up
+ * cookie value gets you past this file and no further — the layout looks
+ * the session up and finds nothing.
  */
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request });
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
+const SESSION_COOKIE = "tibyan_session";
 
-  // getUser() re-validates the JWT with Supabase Auth (not just reading
-  // the cookie), which is required before making any access decision.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const role = (user?.app_metadata?.role as AppRole | undefined) ?? null;
+export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  if (!canAccessPath(role, pathname)) {
-    const target = getRedirectFor(role, pathname);
-    const url = request.nextUrl.clone();
-    const [path, query] = target.split("?");
-    url.pathname = path;
-    url.search = query ? `?${query}` : "";
-    return NextResponse.redirect(url);
+  if (getRequiredAccess(pathname) === "public") {
+    return withPathname(request, pathname);
   }
 
+  if (request.cookies.has(SESSION_COOKIE)) {
+    return withPathname(request, pathname);
+  }
+
+  const target = getRedirectFor(null, pathname);
+  const url = request.nextUrl.clone();
+  const [path, search] = target.split("?");
+  url.pathname = path;
+  url.search = search ? `?${search}` : "";
+  return NextResponse.redirect(url);
+}
+
+/**
+ * Forwards the current path to the server layouts as a request header.
+ *
+ * The root layout renders the marketing Navbar and Footer, but
+ * /dashboard ships its own sidebar and topbar — stacking both would give
+ * the student two navigations. A server layout cannot read the pathname
+ * on its own, so it is passed here and read back with headers() in
+ * app/layout.tsx.
+ *
+ * Header-only: it changes no route, no redirect and no access decision.
+ * Kept from the pre-migration middleware, where the dashboard shell
+ * depends on it.
+ */
+function withPathname(request: NextRequest, pathname: string) {
+  const response = NextResponse.next();
+  response.headers.set("x-pathname", pathname);
   return response;
 }
 
 export const config = {
   matcher: [
     /*
-     * Run on everything except static assets and image optimization
-     * files — those are never protected routes and refreshing the
-     * session on them would be wasted edge compute.
+     * Everything except static assets and image optimisation files —
+     * those are never protected routes.
      */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],

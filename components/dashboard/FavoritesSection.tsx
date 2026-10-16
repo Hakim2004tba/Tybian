@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { getSessionUser } from "@/lib/auth/session";
 import { getFavoritesPage } from "@/lib/data/student-dashboard";
 import { Pagination } from "@/components/dashboard/Pagination";
+import { getDictionary } from "@/lib/i18n/locale";
 
 export async function FavoritesSection({
   page,
@@ -13,6 +14,8 @@ export async function FavoritesSection({
   page: number;
   currentParams: Record<string, string | undefined>;
 }) {
+  const { dict } = await getDictionary();
+  const t = dict.dash;
   const user = await getSessionUser();
   const { items, totalCount, pageSize } = await getFavoritesPage(user!.id, page);
 
@@ -21,7 +24,7 @@ export async function FavoritesSection({
       <Card>
         <div className="flex items-center gap-2 text-[14px] text-text-secondary-light">
           <Heart size={16} className="text-text-muted-light" />
-          لا توجد دورات محفوظة في المفضلة بعد.
+          {t.courses.noFavorites}
         </div>
       </Card>
     );
@@ -29,9 +32,9 @@ export async function FavoritesSection({
 
   return (
     <div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {items.map((course) => (
-          <Link key={course.id} href={`/courses/${course.slug}`}>
+          <Link key={course.id} href={`/courses/${course.slug}`} className="min-w-0">
             <Card padded={false} interactive className="flex items-center gap-3 overflow-hidden p-3">
               <div className="relative h-14 w-20 shrink-0 overflow-hidden rounded-sm bg-bg-light">
                 {course.cover_url && (

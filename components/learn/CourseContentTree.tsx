@@ -1,15 +1,12 @@
+"use client";
+
 import Link from "next/link";
 import { Check, Play, Lock, Circle } from "lucide-react";
 import type { LearnSection } from "@/lib/data/learn";
 import { CollapsibleModule } from "@/components/learn/CollapsibleModule";
 import { cn } from "@/lib/utils";
-
-function formatDuration(seconds: number) {
-  if (!seconds) return "";
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
+import { formatLessonLength } from "@/lib/format/duration";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 /**
  * The course-progress bar + collapsible modules — shared between the
@@ -33,6 +30,8 @@ export function CourseContentTree({
   /** Called when a lesson link is clicked — used by the mobile drawer to close itself. */
   onNavigate?: () => void;
 }) {
+  const { t: T } = useI18n();
+  const t = T.learn;
   const totalLessons = sections.reduce((n, s) => n + s.lessons.length, 0);
   const completedCount = sections.reduce(
     (n, s) => n + s.lessons.filter((l) => completedLessonIds.has(l.id)).length,
@@ -44,7 +43,7 @@ export function CourseContentTree({
     <>
       <div className="border-b border-border-dark p-lg">
         <div className="flex items-center justify-between text-[12.5px]">
-          <span className="text-text-secondary-dark">تقدّم الدورة</span>
+          <span className="text-text-secondary-dark">{t.courseProgress}</span>
           <span className="num font-semibold text-primary">{progressPct}%</span>
         </div>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-border-dark">
@@ -54,7 +53,7 @@ export function CourseContentTree({
           />
         </div>
         <div className="num mt-1.5 text-[11.5px] text-text-muted-dark">
-          {completedCount} من {totalLessons} دروس مكتملة
+          {completedCount} {t.of} {totalLessons} {t.lessonsCompleted}
         </div>
       </div>
 
@@ -100,14 +99,14 @@ export function CourseContentTree({
                     <span className="min-w-0 flex-1 truncate">{lesson.title}</span>
                     {lesson.durationSeconds > 0 && (
                       <span className="num shrink-0 text-[11px] text-text-muted-dark">
-                        {formatDuration(lesson.durationSeconds)}
+                        {formatLessonLength(lesson.durationSeconds)}
                       </span>
                     )}
                   </>
                 );
 
                 return isLocked ? (
-                  <Link key={lesson.id} href={`/courses/${courseSlug}`} className={rowClass} title="اشترك لفتح هذا الدرس" onClick={onNavigate}>
+                  <Link key={lesson.id} href={`/courses/${courseSlug}`} className={rowClass} title={t.subscribeToUnlock} onClick={onNavigate}>
                     {content}
                   </Link>
                 ) : (

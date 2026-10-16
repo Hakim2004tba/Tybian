@@ -1,0 +1,4 @@
+# Runtime uploads — created by /api/admin/upload.
+# Ignored in git: these are user data, not source.
+*
+!.gitignore

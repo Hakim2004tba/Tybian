@@ -3,6 +3,7 @@ import { Pagination } from "@/components/dashboard/Pagination";
 import { CreateTeacherForm } from "@/components/admin/CreateTeacherForm";
 import { TeacherRow } from "@/components/admin/TeacherRow";
 import { listTeachersAdmin } from "@/lib/data/admin-listings";
+import { teacherEarnings } from "@/lib/data/teacher-earnings";
 
 export default async function AdminTeachersPage({
   searchParams,
@@ -12,6 +13,8 @@ export default async function AdminTeachersPage({
   const params = await searchParams;
   const page = Math.max(1, Number(params.page) || 1);
   const { items, totalCount, pageSize } = await listTeachersAdmin(page);
+  /* Empty before migration 20, which hides the payout block. */
+  const earnings = await teacherEarnings();
 
   return (
     <div className="flex flex-col gap-6">
@@ -40,6 +43,10 @@ export default async function AdminTeachersPage({
                 bio: t.bio,
                 rating: t.rating,
                 students_count: t.students_count,
+                revenue: t.revenue,
+                paidOrders: t.paidOrders,
+                lastSaleAt: t.lastSaleAt,
+                earnings: earnings.get(t.id) ?? null,
                 courses_count: t.courses_count,
                 fullName: t.profiles?.full_name ?? "—",
                 avatarUrl: t.profiles?.avatar_url ?? null,
